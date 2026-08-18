@@ -8,7 +8,7 @@ type Profile = { name: string; degree: string; major: string; skills: string };
 type Preferences = { province: string; organization: string; focus: string; fitWeight: number };
 type ScoredJob = JobRecord & { fit: number; chance: number; composite: number; reasons: string[] };
 
-const defaultProfile: Profile = { name: "景欣悦", degree: "硕士", major: "应用统计", skills: "Python、R、SQL、机器学习、数据可视化" };
+const defaultProfile: Profile = { name: "君宝", degree: "硕士", major: "应用统计", skills: "Python、R、SQL、机器学习、数据可视化" };
 const defaultPreferences: Preferences = { province: "四川省", organization: "国有企业", focus: "数据分析", fitWeight: 55 };
 
 const viewTitles: Record<View, [string, string]> = {
@@ -100,7 +100,11 @@ export default function Home() {
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem("jobrec-state-v3") || "{}");
-      if (stored.profile) { setProfile(stored.profile); setDraftProfile(stored.profile); }
+      if (stored.profile) {
+        const migratedProfile = { ...stored.profile, name: stored.profile.name === "景欣悦" ? "君宝" : stored.profile.name };
+        setProfile(migratedProfile);
+        setDraftProfile(migratedProfile);
+      }
       if (stored.preferences) { setPreferences(stored.preferences); setDraftPreferences(stored.preferences); }
       if (Array.isArray(stored.saved)) setSaved(stored.saved);
       if (stored.notes) setNotes(stored.notes);
