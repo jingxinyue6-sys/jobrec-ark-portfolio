@@ -20,7 +20,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const base = new URL(`${protocol}://${host}`);
   const title = "智聘方舟 JobRec | AI 求职决策系统";
   const description = "基于匹配度、成功率与综合指数的个性化求职决策产品。";
-  const image = new URL("/og.png", base).toString();
+  const image = new URL("/og-dashboard.png", base).toString();
   return {
     metadataBase: base,
     title,
