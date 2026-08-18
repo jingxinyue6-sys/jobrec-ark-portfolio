@@ -6,6 +6,7 @@ import { campusEvents, officialSources, type CampusEvent } from "./events";
 type Scope = "all" | "upcoming" | "saved";
 type EventType = "全部类型" | CampusEvent["type"];
 type Campus = "全部校区" | CampusEvent["campus"];
+type CompanyType = "全部企业" | CampusEvent["companyType"];
 const prepItems = ["更新一页简历", "准备60秒自我介绍", "整理3个想问企业的问题"];
 
 function displayDate(date: string) {
@@ -28,6 +29,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [eventType, setEventType] = useState<EventType>("全部类型");
   const [campus, setCampus] = useState<Campus>("全部校区");
+  const [companyType, setCompanyType] = useState<CompanyType>("全部企业");
   const [saved, setSaved] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try { return JSON.parse(localStorage.getItem("jobrec-campus-saved") || "[]"); } catch { return []; }
@@ -49,12 +51,13 @@ export default function Home() {
 
   const upcoming = campusEvents.find((event) => event.status === "upcoming")!;
   const filteredEvents = useMemo(() => campusEvents.filter((event) => {
-    const keyword = `${event.title}${event.address}${event.organizer}${event.audience}`.toLowerCase();
+    const keyword = `${event.title}${event.address}${event.organizer}${event.audience}${event.companyType}`.toLowerCase();
     return (!query || keyword.includes(query.toLowerCase()))
       && (eventType === "全部类型" || event.type === eventType)
       && (campus === "全部校区" || event.campus === campus)
+      && (companyType === "全部企业" || event.companyType === companyType)
       && (scope === "all" || (scope === "upcoming" ? event.status === "upcoming" : saved.includes(event.id)));
-  }), [campus, eventType, query, saved, scope]);
+  }), [campus, companyType, eventType, query, saved, scope]);
 
   function toggleSave(id: string) {
     const exists = saved.includes(id);
@@ -93,7 +96,7 @@ export default function Home() {
       <section className="workspace" id="events">
         <div className="events-panel">
           <div className="section-heading"><div><span className="eyebrow">CAMPUS CALENDAR</span><h2>校园求职日历</h2><p>未来场次优先展示，往期活动保留作求职节奏参考。</p></div><a href={officialSources.talks} target="_blank" rel="noreferrer">查看官方完整日历 ↗</a></div>
-          <div className="toolbar"><label className="search-box"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索活动、企业或地点" /></label><select value={eventType} onChange={(event) => setEventType(event.target.value as EventType)} aria-label="活动类型"><option>全部类型</option><option>双选会</option><option>线下宣讲</option><option>线上宣讲</option></select><select value={campus} onChange={(event) => setCampus(event.target.value as Campus)} aria-label="校区"><option>全部校区</option><option>望江校区</option><option>江安校区</option><option>华西校区</option><option>线上</option></select></div>
+          <div className="toolbar"><label className="search-box"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索活动、企业或地点" /></label><select value={eventType} onChange={(event) => setEventType(event.target.value as EventType)} aria-label="活动类型"><option>全部类型</option><option>双选会</option><option>线下宣讲</option><option>线上宣讲</option></select><select value={companyType} onChange={(event) => setCompanyType(event.target.value as CompanyType)} aria-label="企业类型"><option>全部企业</option><option>国企央企</option><option>金融</option><option>教育</option><option>医药卫生</option><option>地方引才</option><option>综合招聘</option></select><select value={campus} onChange={(event) => setCampus(event.target.value as Campus)} aria-label="校区"><option>全部校区</option><option>望江校区</option><option>江安校区</option><option>华西校区</option><option>线上</option></select></div>
           <div className="scope-tabs"><button className={scope === "all" ? "active" : ""} onClick={() => setScope("all")}>全部活动</button><button className={scope === "upcoming" ? "active" : ""} onClick={() => setScope("upcoming")}>即将开始</button><button className={scope === "saved" ? "active" : ""} onClick={() => setScope("saved")}>我的日程 ({saved.length})</button></div>
           <div className="event-list">{filteredEvents.map((event) => <article className={`event-row ${event.status}`} key={event.id}><div className="event-date"><b>{event.date.slice(8)}</b><span>{event.date.slice(5, 7)}月</span></div><button className="event-main" onClick={() => setSelected(event)}><div><span className={`tag ${event.type === "双选会" ? "blue" : ""}`}>{event.type}</span><span className="tag">{event.campus}</span>{event.status === "past" && <span className="tag muted">已结束</span>}</div><h3>{event.title}</h3><p>{event.time} · {event.address}</p></button><div className="event-actions"><button className={saved.includes(event.id) ? "saved" : ""} onClick={() => toggleSave(event.id)} aria-label="加入日程">{saved.includes(event.id) ? "★" : "☆"}</button><button onClick={() => setSelected(event)} aria-label="查看详情">›</button></div></article>)}{!filteredEvents.length && <div className="empty-state"><span>◎</span><h3>{scope === "saved" ? "还没有加入日程的活动" : "没有找到匹配活动"}</h3><p>{scope === "saved" ? "点击活动右侧的星标，把重要场次集中到这里。" : "试试清除搜索词或切换筛选条件。"}</p><button onClick={() => { setScope("all"); setQuery(""); setEventType("全部类型"); setCampus("全部校区"); }}>查看全部活动</button></div>}</div>
         </div>
