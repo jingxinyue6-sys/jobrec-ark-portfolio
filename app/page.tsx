@@ -99,9 +99,10 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      const stored = JSON.parse(localStorage.getItem("jobrec-state-v3") || "{}");
+      const currentDraft = localStorage.getItem("jobrec-state-v4");
+      const stored = JSON.parse(currentDraft || localStorage.getItem("jobrec-state-v3") || "{}");
       if (stored.profile) {
-        const migratedProfile = { ...stored.profile, name: stored.profile.name === "景欣悦" ? "君宝" : stored.profile.name };
+        const migratedProfile = currentDraft ? stored.profile : { ...stored.profile, name: "君宝" };
         setProfile(migratedProfile);
         setDraftProfile(migratedProfile);
       }
@@ -112,7 +113,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("jobrec-state-v3", JSON.stringify({ profile, preferences, saved, notes }));
+    localStorage.setItem("jobrec-state-v4", JSON.stringify({ profile, preferences, saved, notes }));
   }, [profile, preferences, saved, notes]);
 
   useEffect(() => {
