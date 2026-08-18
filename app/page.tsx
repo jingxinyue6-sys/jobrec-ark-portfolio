@@ -7,7 +7,19 @@ type Scope = "all" | "upcoming" | "saved";
 type EventType = "全部类型" | CampusEvent["type"];
 type Campus = "全部校区" | CampusEvent["campus"];
 type CompanyType = "全部企业" | CampusEvent["companyType"];
+type Profile = { name: string; degree: string; major: string; skills: string; campus: CampusEvent["campus"] | "不限"; targetTypes: CampusEvent["companyType"][] };
+type RecommendedEvent = CampusEvent & { match: number; reason: string };
 const prepItems = ["更新一页简历", "准备60秒自我介绍", "整理3个想问企业的问题"];
+const companyTypes: CampusEvent["companyType"][] = ["国企央企", "金融", "教育", "医药卫生", "地方引才", "综合招聘"];
+const defaultProfile: Profile = { name: "君宝", degree: "硕士", major: "", skills: "", campus: "不限", targetTypes: ["国企央企"] };
+const categoryKeywords: Record<CampusEvent["companyType"], string[]> = {
+  国企央企: ["工程", "计算机", "数据", "统计", "管理", "能源", "材料", "机械", "电气"],
+  金融: ["金融", "经济", "会计", "统计", "数据", "风控", "市场"],
+  教育: ["教育", "师范", "中文", "英语", "数学", "教师", "课程"],
+  医药卫生: ["医学", "药学", "护理", "生物", "公卫", "临床", "口腔"],
+  地方引才: ["公共管理", "城市", "规划", "工程", "经济", "管理"],
+  综合招聘: ["计算机", "数据", "运营", "产品", "工程", "管理", "市场"],
+};
 
 function displayDate(date: string) {
   return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date(`${date}T12:00:00+08:00`));
@@ -24,12 +36,33 @@ function calendarDate(date: string, time: string, end = false) {
   return `${date.replaceAll("-", "")}T${safeTime.replace(":", "")}00`;
 }
 
+function recommendEvent(event: CampusEvent, profile: Profile): RecommendedEvent {
+  const profileText = `${profile.major} ${profile.skills}`.toLowerCase();
+  const hits = categoryKeywords[event.companyType].filter((keyword) => profileText.includes(keyword.toLowerCase()));
+  const typeHit = (profile.targetTypes || []).includes(event.companyType);
+  const campusHit = !profile.campus || profile.campus === "不限" || profile.campus === event.campus;
+  const score = Math.min(96, 48 + (typeHit ? 25 : 0) + (campusHit ? 10 : 0) + (event.status === "upcoming" ? 8 : 0) + Math.min(13, hits.length * 5));
+  const reason = typeHit
+    ? `符合你关注的${event.companyType}${hits.length ? `，并命中${hits.slice(0, 2).join("、")}关键词` : ""}`
+    : hits.length ? `你的${hits.slice(0, 2).join("、")}背景与活动主题相关` : `${event.companyType}活动，可用于拓展求职方向`;
+  return { ...event, match: score, reason };
+}
+
 export default function Home() {
   const [scope, setScope] = useState<Scope>("all");
   const [query, setQuery] = useState("");
   const [eventType, setEventType] = useState<EventType>("全部类型");
   const [campus, setCampus] = useState<Campus>("全部校区");
   const [companyType, setCompanyType] = useState<CompanyType>("全部企业");
+  const [profile, setProfile] = useState<Profile>(() => {
+    if (typeof window === "undefined") return defaultProfile;
+    try { return JSON.parse(localStorage.getItem("jobrec-campus-profile") || "null") || defaultProfile; } catch { return defaultProfile; }
+  });
+  const [draftProfile, setDraftProfile] = useState<Profile>(profile);
+  const [loggedIn, setLoggedIn] = useState(() => typeof window !== "undefined" && localStorage.getItem("jobrec-campus-login") === "true");
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [resumeFileName, setResumeFileName] = useState("");
   const [saved, setSaved] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try { return JSON.parse(localStorage.getItem("jobrec-campus-saved") || "[]"); } catch { return []; }
@@ -50,6 +83,7 @@ export default function Home() {
   }, [toast]);
 
   const upcoming = campusEvents.find((event) => event.status === "upcoming")!;
+  const recommendations = useMemo(() => campusEvents.map((event) => recommendEvent(event, profile)).sort((a, b) => Number(b.status === "upcoming") - Number(a.status === "upcoming") || b.match - a.match).slice(0, 3), [profile]);
   const filteredEvents = useMemo(() => campusEvents.filter((event) => {
     const keyword = `${event.title}${event.address}${event.organizer}${event.audience}${event.companyType}`.toLowerCase();
     return (!query || keyword.includes(query.toLowerCase()))
@@ -65,6 +99,17 @@ export default function Home() {
     setToast(exists ? "已从日程移除" : "已加入我的日程");
   }
   function togglePrep(item: string) { setPrep(prep.includes(item) ? prep.filter((value) => value !== item) : [...prep, item]); }
+  function openProfile() { setDraftProfile(profile); setShowUserMenu(false); setShowProfileModal(true); }
+  function saveProfile() {
+    const normalized = { ...draftProfile, name: draftProfile.name.trim() || "君宝", major: draftProfile.major.trim(), skills: draftProfile.skills.trim() };
+    setProfile(normalized); setLoggedIn(true); setShowProfileModal(false);
+    localStorage.setItem("jobrec-campus-profile", JSON.stringify(normalized)); localStorage.setItem("jobrec-campus-login", "true");
+    setToast("求职档案已保存，推荐已更新");
+  }
+  function logout() { setLoggedIn(false); setShowUserMenu(false); localStorage.removeItem("jobrec-campus-login"); setToast("已退出本机体验账号"); }
+  function toggleTargetType(value: CampusEvent["companyType"]) {
+    setDraftProfile((current) => ({ ...current, targetTypes: current.targetTypes.includes(value) ? current.targetTypes.filter((item) => item !== value) : [...current.targetTypes, value] }));
+  }
   function addCalendar(event: CampusEvent) {
     const body = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//JobRec//Campus Events//CN", "BEGIN:VEVENT", `UID:${event.id}@jobrec`, `DTSTART;TZID=Asia/Shanghai:${calendarDate(event.date, event.time)}`, `DTEND;TZID=Asia/Shanghai:${calendarDate(event.date, event.time, true)}`, `SUMMARY:${event.title}`, `LOCATION:${event.campus} ${event.address}`, `DESCRIPTION:信息来源：四川大学就业指导中心官网 ${event.officialUrl}`, "END:VEVENT", "END:VCALENDAR"].join("\r\n");
     const url = URL.createObjectURL(new Blob([body], { type: "text/calendar;charset=utf-8" }));
@@ -82,7 +127,11 @@ export default function Home() {
     <header className="site-header">
       <a className="brand" href="#top" aria-label="返回首页"><span className="brand-mark">舟</span><span><b>智聘方舟</b><small>SCU CAMPUS CAREER</small></span></a>
       <nav aria-label="主导航"><button onClick={() => scrollToEvents("upcoming")}>近期活动</button><button onClick={() => scrollToEvents("all")}>全部日历</button><button onClick={() => scrollToEvents("saved")}>我的日程 <em>{saved.length}</em></button></nav>
-      <a className="official-link" href={officialSources.home} target="_blank" rel="noreferrer">川大就业官网 ↗</a><div className="avatar" title="君宝">君</div>
+      <a className="official-link" href={officialSources.home} target="_blank" rel="noreferrer">川大就业官网 ↗</a>
+      <div className="account-wrap">
+        <button className="account-button" onClick={() => setShowUserMenu(!showUserMenu)} aria-label="打开个人中心"><span className="avatar">{loggedIn ? profile.name.slice(0, 1) : "登"}</span><span className="account-label">{loggedIn ? profile.name : "登录"}</span></button>
+        {showUserMenu && <div className="account-menu">{loggedIn ? <><span>本机体验账号</span><b>{profile.name}</b><p>{profile.degree} · {profile.major || "专业待完善"}</p><button className="menu-primary" onClick={openProfile}>编辑求职档案</button><button onClick={logout}>退出登录</button></> : <><span>个人中心</span><b>建立你的求职档案</b><p>填写学历、专业和技能，获得更合适的活动推荐。</p><button className="menu-primary" onClick={openProfile}>登录 / 建立档案</button><small>资料仅保存在当前浏览器</small></>}</div>}
+      </div>
     </header>
 
     <main id="top">
@@ -92,6 +141,12 @@ export default function Home() {
       </section>
 
       <section className="quick-stats" aria-label="数据概览"><div><span>下一场活动</span><b>09.04</b><small>国企央企专场</small></div><div><span>覆盖校区</span><b>3</b><small>望江 · 江安 · 华西</small></div><div><span>活动类型</span><b>3</b><small>宣讲 · 双选 · 线上</small></div><div><span>官方更新</span><b>08.18</b><small>2026 年最新核验</small></div></section>
+
+      {loggedIn ? <section className="recommend-section">
+        <div className="recommend-head"><div><span className="eyebrow">FOR YOU</span><h2>为{profile.name}推荐</h2><p>根据你的{profile.degree}学历、{profile.major || "专业"}背景、技能与求职偏好计算。</p></div><button onClick={openProfile}>调整求职档案</button></div>
+        <div className="recommend-grid">{recommendations.map((event) => <article key={event.id}><div className="match-score"><b>{event.match}%</b><span>匹配度</span></div><div className="recommend-content"><div><span className="tag blue">{event.companyType}</span><span className="tag">{event.campus}</span></div><h3>{event.title}</h3><p>{event.reason}</p><small>{displayDate(event.date)} · {event.time}</small></div><div className="recommend-actions"><button onClick={() => setSelected(event)}>查看详情</button><button className={saved.includes(event.id) ? "saved" : ""} onClick={() => toggleSave(event.id)}>{saved.includes(event.id) ? "✓ 已加入日程" : "+ 加入日程"}</button></div></article>)}</div>
+        <p className="recommend-note">推荐基于活动主题与个人填写信息的规则匹配，不代表企业资格审核或录用承诺。</p>
+      </section> : <section className="profile-callout"><div><span>◎</span><p><b>让合适的宣讲会主动找到你</b><small>登录并填写学历、专业、技能和意向企业类型，系统会优先呈现相关活动。</small></p></div><button onClick={openProfile}>建立求职档案 →</button></section>}
 
       <section className="workspace" id="events">
         <div className="events-panel">
@@ -111,6 +166,9 @@ export default function Home() {
     </main>
 
     <footer><div className="brand"><span className="brand-mark">舟</span><span><b>智聘方舟</b><small>校园求职资源导航</small></span></div><p>作品集交互原型 · 数据来自四川大学就业指导中心官网</p><a href={officialSources.home} target="_blank" rel="noreferrer">官方数据源 ↗</a></footer>
+
+    {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions */}
+    {showProfileModal && <div className="modal-layer" onMouseDown={() => setShowProfileModal(false)}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowProfileModal(false)}>×</button><span className="profile-kicker">本机体验登录</span><h2 id="profile-title">建立求职档案</h2><p className="profile-intro">信息仅保存在当前浏览器，用于计算活动推荐，不会上传至服务器。</p><form onSubmit={(event) => { event.preventDefault(); saveProfile(); }}><div className="profile-form-grid"><label><span>昵称</span><input value={draftProfile.name} onChange={(event) => setDraftProfile({ ...draftProfile, name: event.target.value })} placeholder="例如：君宝" /></label><label><span>最高学历</span><select value={draftProfile.degree} onChange={(event) => setDraftProfile({ ...draftProfile, degree: event.target.value })}><option>本科</option><option>硕士</option><option>博士</option></select></label><label className="wide"><span>专业</span><input value={draftProfile.major} onChange={(event) => setDraftProfile({ ...draftProfile, major: event.target.value })} placeholder="例如：应用统计、计算机科学、临床医学" /></label><label className="wide"><span>技能关键词</span><textarea value={draftProfile.skills} onChange={(event) => setDraftProfile({ ...draftProfile, skills: event.target.value })} rows={3} placeholder="例如：Python、数据分析、英语、项目管理" /></label><label><span>偏好校区</span><select value={draftProfile.campus} onChange={(event) => setDraftProfile({ ...draftProfile, campus: event.target.value as Profile["campus"] })}><option>不限</option><option>望江校区</option><option>江安校区</option><option>华西校区</option><option>线上</option></select></label><label className="resume-upload"><span>附加简历（可选）</span><input type="file" accept=".pdf,.doc,.docx" onChange={(event) => setResumeFileName(event.target.files?.[0]?.name || "")} /><i>{resumeFileName || "选择 PDF / Word"}</i></label></div><fieldset><legend>意向企业类型（可多选）</legend><div className="target-types">{companyTypes.map((item) => <label key={item}><input type="checkbox" checked={draftProfile.targetTypes.includes(item)} onChange={() => toggleTargetType(item)} /><span>{item}</span></label>)}</div></fieldset><div className="privacy-note">🔒 简历文件只读取文件名，不上传、不解析；推荐依据由你填写的专业与技能生成。</div><button className="profile-save" type="submit">保存档案并查看推荐</button></form></section></div>}
 
     {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions */}
     {selected && <div className="modal-layer" onMouseDown={() => setSelected(null)}><section className="event-modal" role="dialog" aria-modal="true" aria-labelledby="event-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setSelected(null)}>×</button><div className="event-type-row"><span className={`tag ${selected.type === "双选会" ? "blue" : ""}`}>{selected.type}</span><span className="tag">{selected.campus}</span><span className={`tag ${selected.status === "past" ? "muted" : "green"}`}>{selected.status === "past" ? "往期记录" : "即将开始"}</span></div><h2 id="event-title">{selected.title}</h2><p className="modal-summary">{selected.summary}</p><dl className="event-details"><div><dt>日期</dt><dd>{displayDate(selected.date)}</dd></div><div><dt>时间</dt><dd>{selected.time}</dd></div><div><dt>地点</dt><dd>{selected.campus} · {selected.address}</dd></div><div><dt>适合人群</dt><dd>{selected.audience}</dd></div><div><dt>发布方</dt><dd>{selected.organizer}</dd></div></dl><div className="modal-note">信息核验于 {officialSources.updatedAt}。活动安排可能变化，请以官方页面最新通知为准。</div><div className="modal-actions"><button onClick={() => copyAddress(selected)}>复制地点</button><button onClick={() => addCalendar(selected)}>下载日历</button><button className="primary" onClick={() => toggleSave(selected.id)}>{saved.includes(selected.id) ? "✓ 已加入日程" : "+ 加入我的日程"}</button></div><a className="modal-official" href={selected.officialUrl} target="_blank" rel="noreferrer">前往四川大学就业指导中心官网核验详情 ↗</a></section></div>}
