@@ -18,8 +18,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const base = new URL(`${protocol}://${host}`);
-  const title = "智聘方舟 JobRec | AI 求职决策系统";
-  const description = "基于匹配度、成功率与综合指数的个性化求职决策产品。";
+  const title = "智聘方舟 | 四川大学校园招聘日历";
+  const description = "聚合四川大学校内宣讲会与双选会信息，帮助校招生发现活动、加入日程并做好参会准备。";
   const image = new URL("/og-dashboard.png", base).toString();
   return {
     metadataBase: base,
