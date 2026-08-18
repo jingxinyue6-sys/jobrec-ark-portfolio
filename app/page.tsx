@@ -12,9 +12,9 @@ const defaultProfile: Profile = { name: "景欣悦", degree: "硕士", major: "�
 const defaultPreferences: Preferences = { province: "四川省", organization: "国有企业", focus: "数据分析", fitWeight: 55 };
 
 const viewTitles: Record<View, [string, string]> = {
-  dashboard: ["求职仪表盘", "基于真实历史校招数据的个性化决策概览"],
+  dashboard: ["求职仪表盘", "基于四川大学就业指导中心往年校招数据的决策原型"],
   jobs: ["岗位推荐", "筛选、排序和比较真实岗位记录"],
-  events: ["宣讲与双选活动", "查看数据集中的真实活动名称与地址"],
+  events: ["宣讲与双选活动", "查看往年活动记录，并前往官方平台核验今年安排"],
   saved: ["我的收藏", "保存在当前浏览器中的重点岗位"],
   profile: ["能力档案", "完善个人信息，让评分更贴近你的情况"],
   preferences: ["求职偏好", "调整地域、单位性质和决策权重"],
@@ -65,6 +65,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function NavIcon({ children }: { children: React.ReactNode }) {
   return <span className="nav-icon" aria-hidden="true">{children}</span>;
+}
+
+function OfficialDataNotice({ compact = false }: { compact?: boolean }) {
+  return <aside className={`official-data-notice ${compact ? "compact" : ""}`}>
+    <div><strong>数据来源说明</strong><p>本页数据整理自四川大学就业指导中心往年公开校招信息，可能为上一年度历史样本，不代表今年仍在招聘。</p></div>
+    <a href="https://jy.scu.edu.cn/" target="_blank" rel="noreferrer">前往官方平台查看今年数据 ↗</a>
+  </aside>;
 }
 
 export default function Home() {
@@ -176,6 +183,7 @@ export default function Home() {
   function DashboardView() {
     const topJobs = scoredJobs.slice().sort((a, b) => b.composite - a.composite).slice(0, 5);
     return <>
+      <OfficialDataNotice />
       <section className="ai-banner"><div><span>✦</span><p><b>AI 今日建议</b><small>基于当前画像与历史校招样本动态计算</small></p></div><p>当前最值得优先研究的是 <b>{topJobs[0].company} · {topJobs[0].role}</b>，综合指数 {topJobs[0].composite}。</p><button onClick={() => setSelected(topJobs[0])}>查看详情 →</button></section>
       <section className="stat-grid">
         <article><p>历史岗位样本</p><strong>{datasetStats.totalJobs.toLocaleString()}</strong><span className="status green">● 两个工作表已关联</span></article>
@@ -192,15 +200,15 @@ export default function Home() {
   }
 
   function JobsView({ records = filteredJobs, savedOnly = false }: { records?: ScoredJob[]; savedOnly?: boolean }) {
-    return <section className="panel full-panel">
+    return <><OfficialDataNotice compact /><section className="panel full-panel">
       <div className="panel-head"><div><h2>{savedOnly ? "收藏岗位" : "岗位数据"}</h2><p>{savedOnly ? "收藏保存在当前设备浏览器中" : `展示 ${records.length} 条真实岗位记录，评分会随画像和偏好变化`}</p></div><div className="head-actions"><button onClick={() => exportCsv(records)}>导出 CSV</button>{compareIds.length >= 2 && <button className="primary" onClick={() => setShowCompare(true)}>比较 {compareIds.length} 个岗位</button>}</div></div>
       {!savedOnly && <div className="filterbar"><Field label="搜索"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="岗位、单位、专业或行业" /></Field><Field label="工作地区"><select value={province} onChange={(event) => setProvince(event.target.value)}><option>全部地区</option>{provinces.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="单位性质"><select value={organization} onChange={(event) => setOrganization(event.target.value)}><option>全部单位</option>{organizations.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="排序"><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="composite">综合指数</option><option value="fit">匹配度</option><option value="chance">成功潜力</option><option value="salary">薪资上限</option></select></Field><button className="reset" onClick={() => { setQuery(""); setProvince("全部地区"); setOrganization("全部单位"); setSort("composite"); }}>重置</button></div>}
       <JobTable records={records} />
-    </section>;
+    </section></>;
   }
 
   function EventsView() {
-    return <section className="panel full-panel"><div className="panel-head"><div><h2>真实活动记录</h2><p>活动名称、形式和地址直接来自「附加信息」工作表；数据为历史校招样本，不代表当前仍在开放。</p></div></div><div className="event-grid">{uniqueEvents.map((event) => <button key={`${event.id}-${event.event}`} onClick={() => setEventDetail(event)}><div className="event-card-top"><span className={event.eventType === "线上" ? "online" : "offline"}>{event.eventType}</span><em>{event.id}</em></div><h3>{event.event}</h3><p>⌖ {event.eventAddress}</p><div><span>{event.company}</span><b>查看关联岗位 →</b></div></button>)}</div></section>;
+    return <><OfficialDataNotice compact /><section className="panel full-panel"><div className="panel-head"><div><h2>往年活动记录</h2><p>活动名称、形式和地址来自四川大学就业指导中心历史数据，不代表今年仍在开放。</p></div></div><div className="event-grid">{uniqueEvents.map((event) => <button key={`${event.id}-${event.event}`} onClick={() => setEventDetail(event)}><div className="event-card-top"><span className={event.eventType === "线上" ? "online" : "offline"}>{event.eventType}</span><em>{event.id}</em></div><h3>{event.event}</h3><p>⌖ {event.eventAddress}</p><div><span>{event.company}</span><b>查看关联岗位 →</b></div></button>)}</div></section></>;
   }
 
   function ProfileView() {
