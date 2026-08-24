@@ -104,7 +104,11 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [toast]);
   useEffect(() => {
-    const feedUrl = new URL("./scu-jobs.json", window.location.href);
+    const feedUrl = window.location.hostname.endsWith("github.io")
+      ? new URL("./scu-jobs.json", window.location.href)
+      : new URL(
+          "https://jingxinyue6-sys.github.io/jobrec-ark-portfolio/scu-jobs.json",
+        );
     fetch(feedUrl, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(String(response.status))))
       .then((feed: ScuJobFeed) => setJobFeed(feed))
