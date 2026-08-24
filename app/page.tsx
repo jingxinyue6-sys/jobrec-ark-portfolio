@@ -9,6 +9,12 @@ type Campus = "全部校区" | CampusEvent["campus"];
 type CompanyType = "全部企业" | CampusEvent["companyType"];
 type Profile = { name: string; degree: string; major: string; skills: string; campus: CampusEvent["campus"] | "不限"; targetTypes: CampusEvent["companyType"][] };
 type RecommendedEvent = CampusEvent & { match: number; reason: string };
+type ScuJob = {
+  id: string; title: string; company: string; jobType: string; nature: string; education: string;
+  headcount: string; salary: string; publishedAt: string; deadline: string; major: string; location: string;
+  requirements: string; responsibilities: string; industry: string; source: string; sourceUrl: string;
+};
+type ScuJobFeed = { source: string; sourceUrl: string; updatedAt: string; count: number; jobs: ScuJob[] };
 const prepItems = ["更新一页简历", "准备60秒自我介绍", "整理3个想问企业的问题"];
 const companyTypes: CampusEvent["companyType"][] = ["国企央企", "金融", "教育", "医药卫生", "地方引才", "综合招聘"];
 const defaultProfile: Profile = { name: "君宝", degree: "硕士", major: "", skills: "", campus: "不限", targetTypes: ["国企央企"] };
@@ -34,6 +40,19 @@ function calendarDate(date: string, time: string, end = false) {
   const matches = time.match(/\d{2}:\d{2}/g) || [];
   const safeTime = matches[end ? 1 : 0] || (end ? "17:00" : "14:00");
   return `${date.replaceAll("-", "")}T${safeTime.replace(":", "")}00`;
+}
+
+function displaySyncTime(value: string) {
+  if (!value) return "等待首次同步";
+  return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
+}
+
+function jobMatch(job: ScuJob, profile: Profile) {
+  const profileTerms = `${profile.major} ${profile.skills}`.toLowerCase().split(/[\s,，、/]+/).filter((term) => term.length > 1);
+  const jobText = `${job.title} ${job.major} ${job.requirements} ${job.responsibilities} ${job.industry}`.toLowerCase();
+  const hits = profileTerms.filter((term) => jobText.includes(term));
+  const degreeHit = !profile.degree || job.education === "不限" || job.education.includes(profile.degree.replace("在读", ""));
+  return Math.min(96, 56 + (degreeHit ? 16 : 0) + Math.min(24, hits.length * 8));
 }
 
 function recommendEvent(event: CampusEvent, profile: Profile): RecommendedEvent {
@@ -73,6 +92,9 @@ export default function Home() {
   });
   const [selected, setSelected] = useState<CampusEvent | null>(null);
   const [toast, setToast] = useState("");
+  const [jobFeed, setJobFeed] = useState<ScuJobFeed | null>(null);
+  const [jobQuery, setJobQuery] = useState("");
+  const [jobNature, setJobNature] = useState("全部岗位");
 
   useEffect(() => { localStorage.setItem("jobrec-campus-saved", JSON.stringify(saved)); }, [saved]);
   useEffect(() => { localStorage.setItem("jobrec-campus-prep", JSON.stringify(prep)); }, [prep]);
@@ -81,6 +103,13 @@ export default function Home() {
     const timer = window.setTimeout(() => setToast(""), 2200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+  useEffect(() => {
+    const feedUrl = new URL("./scu-jobs.json", window.location.href);
+    fetch(feedUrl, { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(String(response.status))))
+      .then((feed: ScuJobFeed) => setJobFeed(feed))
+      .catch(() => setJobFeed(null));
+  }, []);
 
   const upcoming = campusEvents.find((event) => event.status === "upcoming")!;
   const recommendations = useMemo(() => campusEvents.map((event) => recommendEvent(event, profile)).sort((a, b) => Number(b.status === "upcoming") - Number(a.status === "upcoming") || b.match - a.match).slice(0, 3), [profile]);
@@ -92,6 +121,11 @@ export default function Home() {
       && (companyType === "全部企业" || event.companyType === companyType)
       && (scope === "all" || (scope === "upcoming" ? event.status === "upcoming" : saved.includes(event.id)));
   }), [campus, companyType, eventType, query, saved, scope]);
+  const filteredJobs = useMemo(() => (jobFeed?.jobs || []).filter((job) => {
+    const keyword = `${job.title}${job.company}${job.major}${job.location}${job.industry}`.toLowerCase();
+    return (!jobQuery || keyword.includes(jobQuery.toLowerCase()))
+      && (jobNature === "全部岗位" || job.nature.includes(jobNature));
+  }).slice(0, 12), [jobFeed, jobNature, jobQuery]);
 
   function toggleSave(id: string) {
     const exists = saved.includes(id);
@@ -126,7 +160,7 @@ export default function Home() {
   return <div className="site-shell">
     <header className="site-header">
       <a className="brand" href="#top" aria-label="返回首页"><span className="brand-mark">ssp</span><span><b>智聘方舟</b><small>SCU CAMPUS CAREER</small></span></a>
-      <nav aria-label="主导航"><button onClick={() => scrollToEvents("upcoming")}>近期活动</button><button onClick={() => scrollToEvents("all")}>全部日历</button><button onClick={() => scrollToEvents("saved")}>我的日程 <em>{saved.length}</em></button></nav>
+      <nav aria-label="主导航"><button onClick={() => document.getElementById("jobs")?.scrollIntoView({ behavior: "smooth" })}>最新岗位</button><button onClick={() => scrollToEvents("upcoming")}>近期活动</button><button onClick={() => scrollToEvents("all")}>全部日历</button><button onClick={() => scrollToEvents("saved")}>我的日程 <em>{saved.length}</em></button></nav>
       <a className="official-link" href={officialSources.home} target="_blank" rel="noreferrer">川大就业官网 ↗</a>
       <div className="account-wrap">
         <button className="account-button" onClick={() => setShowUserMenu(!showUserMenu)} aria-label="打开个人中心"><span className="avatar">{loggedIn ? profile.name.slice(0, 1) : "登"}</span><span className="account-label">{loggedIn ? profile.name : "登录"}</span></button>
@@ -140,13 +174,20 @@ export default function Home() {
         <article className="next-event-card"><div className="next-head"><span>下一场校内活动</span><b>{countdown(upcoming.date)}</b></div><div className="date-block"><strong>04</strong><span>SEP<br />FRI</span></div><div className="event-type-row"><span className="tag blue">{upcoming.type}</span><span className="tag">{upcoming.campus}</span></div><h2>{upcoming.title}</h2><dl><div><dt>时间</dt><dd>{displayDate(upcoming.date)} · {upcoming.time}</dd></div><div><dt>地点</dt><dd>{upcoming.address}</dd></div></dl><button className="card-action" onClick={() => setSelected(upcoming)}>查看详情与准备清单 <span>→</span></button></article>
       </section>
 
-      <section className="quick-stats" aria-label="数据概览"><div><span>下一场活动</span><b>09.04</b><small>国企央企专场</small></div><div><span>覆盖校区</span><b>3</b><small>望江 · 江安 · 华西</small></div><div><span>活动类型</span><b>3</b><small>宣讲 · 双选 · 线上</small></div><div><span>官方更新</span><b>08.18</b><small>2026 年最新核验</small></div></section>
+      <section className="quick-stats" aria-label="数据概览"><div><span>下一场活动</span><b>09.04</b><small>国企央企专场</small></div><div><span>同步岗位</span><b>{jobFeed?.count || "—"}</b><small>全职 · 实习 · 综合</small></div><div><span>覆盖校区</span><b>3</b><small>望江 · 江安 · 华西</small></div><div><span>最近同步</span><b>{jobFeed ? displaySyncTime(jobFeed.updatedAt).slice(0, 5) : "—"}</b><small>{jobFeed ? displaySyncTime(jobFeed.updatedAt) : "正在读取官方数据"}</small></div></section>
 
       {loggedIn ? <section className="recommend-section">
         <div className="recommend-head"><div><span className="eyebrow">FOR YOU</span><h2>为{profile.name}推荐</h2><p>根据你的{profile.degree}学历、{profile.major || "专业"}背景、技能与求职偏好计算。</p></div><button onClick={openProfile}>调整求职档案</button></div>
         <div className="recommend-grid">{recommendations.map((event) => <article key={event.id}><div className="match-score"><b>{event.match}%</b><span>匹配度</span></div><div className="recommend-content"><div><span className="tag blue">{event.companyType}</span><span className="tag">{event.campus}</span></div><h3>{event.title}</h3><p>{event.reason}</p><small>{displayDate(event.date)} · {event.time}</small></div><div className="recommend-actions"><button onClick={() => setSelected(event)}>查看详情</button><button className={saved.includes(event.id) ? "saved" : ""} onClick={() => toggleSave(event.id)}>{saved.includes(event.id) ? "✓ 已加入日程" : "+ 加入日程"}</button></div></article>)}</div>
         <p className="recommend-note">推荐基于活动主题与个人填写信息的规则匹配，不代表企业资格审核或录用承诺。</p>
       </section> : <section className="profile-callout"><div><span>◎</span><p><b>让合适的宣讲会主动找到你</b><small>登录并填写学历、专业、技能和意向企业类型，系统会优先呈现相关活动。</small></p></div><button onClick={openProfile}>建立求职档案 →</button></section>}
+
+      <section className="jobs-section" id="jobs">
+        <div className="jobs-heading"><div><span className="eyebrow">SCU LIVE JOB FEED</span><h2>川大最新岗位</h2><p>系统每 6 小时同步一次就业指导中心官网公开岗位，结果以官方原文为准。</p></div><div className="sync-badge"><i className={jobFeed ? "online" : ""} /><span>{jobFeed ? `已同步 ${jobFeed.count} 条` : "正在读取"}<small>{jobFeed ? displaySyncTime(jobFeed.updatedAt) : "等待数据"}</small></span></div></div>
+        <div className="jobs-toolbar"><label><span>⌕</span><input value={jobQuery} onChange={(event) => setJobQuery(event.target.value)} placeholder="搜索岗位、企业、专业或地点" /></label><select value={jobNature} onChange={(event) => setJobNature(event.target.value)}><option>全部岗位</option><option>全职</option><option>实习</option></select><a href={jobFeed?.sourceUrl || "https://jy.scu.edu.cn/index/index/employjob.html"} target="_blank" rel="noreferrer">川大岗位原始列表 ↗</a></div>
+        <div className="jobs-grid">{filteredJobs.map((job) => <article key={job.id}><div className="job-top"><span>{job.nature}</span><b>{loggedIn ? `${jobMatch(job, profile)}% 匹配` : job.publishedAt || "最新发布"}</b></div><h3>{job.title}</h3><p>{job.company}</p><dl><div><dt>地点</dt><dd>{job.location}</dd></div><div><dt>学历</dt><dd>{job.education}</dd></div><div><dt>薪资</dt><dd>{job.salary}</dd></div><div><dt>截止</dt><dd>{job.deadline || "以官网为准"}</dd></div></dl><div className="job-tags"><span>{job.jobType}</span><span>{job.industry}</span></div><a href={job.sourceUrl} target="_blank" rel="noreferrer">查看川大官方原文 <span>→</span></a></article>)}{!filteredJobs.length && <div className="jobs-empty"><b>{jobFeed ? "没有匹配岗位" : "正在获取川大最新岗位"}</b><p>{jobFeed ? "试试更换关键词或岗位类型。" : "首次加载可能需要几秒钟。"}</p></div>}</div>
+        <p className="jobs-disclaimer">岗位来自四川大学就业指导中心官网公开页面；同步可能存在延迟，投递要求、截止时间及联系方式请以官方原文为准。</p>
+      </section>
 
       <section className="workspace" id="events">
         <div className="events-panel">
@@ -158,7 +199,7 @@ export default function Home() {
         <aside className="planner">
           <section className="planner-card"><div className="planner-title"><div><span>我的日程</span><b>{saved.length} 场</b></div><span className="mini-calendar">▦</span></div>{saved.length ? <div className="saved-list">{campusEvents.filter((event) => saved.includes(event.id)).map((event) => <button key={event.id} onClick={() => setSelected(event)}><span>{event.date.slice(5).replace("-", ".")}</span><p><b>{event.title}</b><small>{event.campus}</small></p><em>›</em></button>)}</div> : <p className="planner-empty">收藏活动后，会在这里形成你的专属求职日程。</p>}</section>
           <section className="planner-card prep-card"><div className="planner-title"><div><span>参会前准备</span><b>{prep.length}/{prepItems.length}</b></div><span className="progress-ring">{Math.round(prep.length / prepItems.length * 100)}%</span></div><div className="prep-list">{prepItems.map((item) => <label key={item}><input type="checkbox" checked={prep.includes(item)} onChange={() => togglePrep(item)} /><i>✓</i><span>{item}</span></label>)}</div><p>准备进度仅保存在当前浏览器，不会上传个人信息。</p></section>
-          <section className="source-card"><span>数据可信度</span><h3>只展示可核验的学校官方信息</h3><p>数据核验于 {officialSources.updatedAt}。未来安排可能调整，请在出发前再次查看官网。</p><div><a href={officialSources.talks} target="_blank" rel="noreferrer">宣讲会官网 ↗</a><a href={officialSources.fairs} target="_blank" rel="noreferrer">双选会官网 ↗</a></div></section>
+          <section className="source-card"><span>数据可信度</span><h3>只展示可核验的学校官方信息</h3><p>{jobFeed ? `岗位最近同步于 ${displaySyncTime(jobFeed.updatedAt)}。` : `活动数据核验于 ${officialSources.updatedAt}。`}安排可能调整，请在行动前再次查看官网。</p><div><a href={officialSources.talks} target="_blank" rel="noreferrer">宣讲会官网 ↗</a><a href={officialSources.fairs} target="_blank" rel="noreferrer">双选会官网 ↗</a></div></section>
         </aside>
       </section>
 
