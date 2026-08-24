@@ -1,19 +1,20 @@
-name: Sync SCU jobs and deploy
+name: Deploy synchronized SCU jobs
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 */6 * * *"
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 concurrency:
-  group: scu-job-sync
+  group: jobrec-pages-deploy
   cancel-in-progress: false
 
 jobs:
-  sync-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,15 +25,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run sync:scu
       - run: npm run build:pages
-      - name: Save latest public feed
-        run: |
-          git config user.name "jobrec-sync-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add public/scu-jobs.json
-          git diff --cached --quiet || git commit -m "chore: sync SCU public jobs"
-          git push origin HEAD:main
       - name: Publish GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
