@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 const ORIGIN = "https://jy.scu.edu.cn";
 const LISTS = [
@@ -9,6 +9,8 @@ const LISTS = [
 ];
 
 const entityMap = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+const RETRYABLE_STATUSES = new Set([408, 429, 483, 500, 502, 503, 504]);
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function decodeHtml(value = "") {
   return value
@@ -35,13 +37,29 @@ function publicDescription(value, fallback) {
   return cleaned.slice(0, 1600);
 }
 
-async function fetchHtml(url) {
-  const response = await fetch(url, {
-    headers: { "user-agent": "JobRec-Ark-SCU-public-feed/1.0 (+https://github.com/jingxinyue6-sys/jobrec-ark-portfolio)" },
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!response.ok) throw new Error(`${response.status} ${url}`);
-  return response.text();
+async function fetchHtml(url, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "accept-language": "zh-CN,zh;q=0.9,en;q=0.6",
+          referer: `${ORIGIN}/index/index/employjob.html`,
+          "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(25000),
+      });
+      if (response.ok) return response.text();
+      const error = new Error(`${response.status} ${url}`);
+      if (!RETRYABLE_STATUSES.has(response.status)) throw error;
+      lastError = error;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < attempts) await wait(1500 * attempt + Math.floor(Math.random() * 800));
+  }
+  throw lastError;
 }
 
 function parseList(html, nature) {
@@ -76,7 +94,7 @@ function stableId(url) {
   return `scu-${createHash("sha256").update(url).digest("hex").slice(0, 14)}`;
 }
 
-async function enrich(item) {
+async function enrich(item, cachedJob) {
   try {
     const html = await fetchHtml(item.sourceUrl);
     const fields = parseRows(html);
@@ -102,7 +120,11 @@ async function enrich(item) {
       sourceUrl: item.sourceUrl,
     };
   } catch (error) {
-    console.warn(`详情同步失败，保留列表信息：${item.sourceUrl}`, error.message);
+    if (cachedJob) {
+      console.warn(`详情同步失败，沿用上次完整信息：${item.sourceUrl}`, error.message);
+      return { ...cachedJob, title: item.title || cachedJob.title, company: item.company || cachedJob.company };
+    }
+    console.warn(`新岗位详情同步失败，保留列表信息：${item.sourceUrl}`, error.message);
     return {
       id: stableId(item.sourceUrl), title: item.title, company: item.company, jobType: item.nature,
       nature: item.nature, education: "不限", headcount: "以官网为准", salary: "面议",
@@ -113,16 +135,29 @@ async function enrich(item) {
   }
 }
 
+let previousFeed = { jobs: [] };
+try {
+  previousFeed = JSON.parse(await readFile(new URL("../public/scu-jobs.json", import.meta.url), "utf8"));
+} catch {
+  // 首次同步时没有可复用的数据。
+}
+const cachedByUrl = new Map((previousFeed.jobs || []).map((job) => [job.sourceUrl, job]));
+
 const listed = [];
 for (const source of LISTS) {
   const html = await fetchHtml(`${ORIGIN}${source.url}`);
   listed.push(...parseList(html, source.type));
+  await wait(900);
 }
 
 const unique = [...new Map(listed.map((item) => [item.sourceUrl, item])).values()].slice(0, 48);
+if (unique.length === 0) throw new Error("川大公开岗位列表为空，已停止同步并保留旧数据");
 const jobs = [];
-for (let index = 0; index < unique.length; index += 4) {
-  jobs.push(...await Promise.all(unique.slice(index, index + 4).map(enrich)));
+for (let index = 0; index < unique.length; index += 2) {
+  jobs.push(...await Promise.all(
+    unique.slice(index, index + 2).map((item) => enrich(item, cachedByUrl.get(item.sourceUrl))),
+  ));
+  if (index + 2 < unique.length) await wait(650);
 }
 
 jobs.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt) || a.title.localeCompare(b.title));
