@@ -11,6 +11,7 @@ const LISTS = [
 const entityMap = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 const RETRYABLE_STATUSES = new Set([408, 429, 483, 500, 502, 503, 504]);
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const CONTACT_REPLACEMENT = "（联系方式请查看官网原文）";
 
 function decodeHtml(value = "") {
   return value
@@ -32,9 +33,35 @@ function text(value = "") {
 
 function publicDescription(value, fallback) {
   const cleaned = (value || fallback)
-    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, "（联系方式请查看官网原文）")
-    .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, "（联系方式请查看官网原文）");
+    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, CONTACT_REPLACEMENT)
+    .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, CONTACT_REPLACEMENT)
+    .replace(/(?<!\d)(?:400|800)[-\s]?\d{3}[-\s]?\d{4}(?!\d)/g, CONTACT_REPLACEMENT)
+    .replace(/(?<!\d)0\d{2,3}[-—\s]?\d{7,8}(?:[-—转]\d{1,6})?(?!\d)/g, CONTACT_REPLACEMENT)
+    .replace(/(?:QQ(?:群)?(?:号)?|群号|微信群|微信(?:号)?|公众号)\s*[:：]?\s*[A-Za-z0-9_-]{4,20}/gi, CONTACT_REPLACEMENT)
+    .replace(/(?:联系(?:人|方式|电话)?|咨询(?:电话|方式|热线)?|招聘(?:电话|咨询)?|报名咨询)\s*[:：]\s*[^\n。；;]{3,50}/gi, CONTACT_REPLACEMENT);
   return cleaned.slice(0, 1600);
+}
+
+function sanitizeJob(job) {
+  return {
+    ...job,
+    requirements: publicDescription(job.requirements, "请查看川大就业指导中心官网原文"),
+    responsibilities: publicDescription(job.responsibilities, "请查看川大就业指导中心官网原文"),
+  };
+}
+
+function assertNoContactDetails(jobs) {
+  const forbiddenPatterns = [
+    /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/,
+    /(?<!\d)1[3-9]\d{9}(?!\d)/,
+    /(?<!\d)(?:400|800)[-\s]?\d{3}[-\s]?\d{4}(?!\d)/,
+    /(?<!\d)0\d{2,3}[-—\s]?\d{7,8}(?:[-—转]\d{1,6})?(?!\d)/,
+    /(?:QQ(?:群)?(?:号)?|群号|微信群|微信(?:号)?|公众号)\s*[:：]?\s*[A-Za-z0-9_-]{4,20}/i,
+  ];
+  const descriptions = jobs.flatMap((job) => [job.requirements || "", job.responsibilities || ""]);
+  if (descriptions.some((description) => forbiddenPatterns.some((pattern) => pattern.test(description)))) {
+    throw new Error("同步结果仍含联系方式，已停止写入并保留旧数据");
+  }
 }
 
 async function fetchHtml(url, attempts = 3) {
@@ -143,6 +170,18 @@ try {
 }
 const cachedByUrl = new Map((previousFeed.jobs || []).map((job) => [job.sourceUrl, job]));
 
+if (process.argv.includes("--sanitize-existing")) {
+  const sanitizedExistingJobs = (previousFeed.jobs || []).map(sanitizeJob);
+  assertNoContactDetails(sanitizedExistingJobs);
+  const sanitizedExistingFeed = { ...previousFeed, jobs: sanitizedExistingJobs };
+  await writeFile(
+    new URL("../public/scu-jobs.json", import.meta.url),
+    `${JSON.stringify(sanitizedExistingFeed, null, 2)}\n`,
+  );
+  console.log(`已完成 ${sanitizedExistingJobs.length} 条现有岗位的联系方式脱敏`);
+  process.exit(0);
+}
+
 const listed = [];
 for (const source of LISTS) {
   const html = await fetchHtml(`${ORIGIN}${source.url}`);
@@ -160,15 +199,17 @@ for (let index = 0; index < unique.length; index += 2) {
   if (index + 2 < unique.length) await wait(650);
 }
 
-jobs.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt) || a.title.localeCompare(b.title));
+const sanitizedJobs = jobs.map(sanitizeJob);
+assertNoContactDetails(sanitizedJobs);
+sanitizedJobs.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt) || a.title.localeCompare(b.title));
 const feed = {
   source: "四川大学就业指导中心",
   sourceUrl: `${ORIGIN}/index/index/employjob.html`,
   updatedAt: new Date().toISOString(),
-  count: jobs.length,
-  jobs,
+  count: sanitizedJobs.length,
+  jobs: sanitizedJobs,
 };
 
 await mkdir(new URL("../public/", import.meta.url), { recursive: true });
 await writeFile(new URL("../public/scu-jobs.json", import.meta.url), `${JSON.stringify(feed, null, 2)}\n`);
-console.log(`已同步 ${jobs.length} 条川大公开岗位，更新时间 ${feed.updatedAt}`);
+console.log(`已同步 ${sanitizedJobs.length} 条川大公开岗位，更新时间 ${feed.updatedAt}`);
