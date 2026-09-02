@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { campusEvents, officialSources, type CampusEvent } from "./events";
+import { scoreJob, type JobDecisionScore } from "./scoring";
 
 type Scope = "all" | "upcoming" | "saved";
 type EventType = "全部类型" | CampusEvent["type"];
 type Campus = "全部校区" | CampusEvent["campus"];
 type CompanyType = "全部企业" | CampusEvent["companyType"];
-type Profile = { name: string; degree: string; major: string; skills: string; campus: CampusEvent["campus"] | "不限"; targetTypes: CampusEvent["companyType"][] };
+type Profile = { name: string; degree: string; major: string; skills: string; targetLocations: string; campus: CampusEvent["campus"] | "不限"; targetTypes: CampusEvent["companyType"][] };
 type RecommendedEvent = CampusEvent & { match: number; reason: string };
 type ScuJob = {
   id: string; title: string; company: string; jobType: string; nature: string; education: string;
@@ -15,9 +16,11 @@ type ScuJob = {
   requirements: string; responsibilities: string; industry: string; source: string; sourceUrl: string;
 };
 type ScuJobFeed = { source: string; sourceUrl: string; updatedAt: string; count: number; jobs: ScuJob[] };
+type ScoredJob = ScuJob & { decision: JobDecisionScore };
+type JobSort = "latest" | "match" | "success" | "composite";
 const prepItems = ["更新一页简历", "准备60秒自我介绍", "整理3个想问企业的问题"];
 const companyTypes: CampusEvent["companyType"][] = ["国企央企", "金融", "教育", "医药卫生", "地方引才", "综合招聘"];
-const defaultProfile: Profile = { name: "君宝", degree: "硕士", major: "", skills: "", campus: "不限", targetTypes: ["国企央企"] };
+const defaultProfile: Profile = { name: "君宝", degree: "硕士", major: "", skills: "", targetLocations: "", campus: "不限", targetTypes: ["国企央企"] };
 const categoryKeywords: Record<CampusEvent["companyType"], string[]> = {
   国企央企: ["工程", "计算机", "数据", "统计", "管理", "能源", "材料", "机械", "电气"],
   金融: ["金融", "经济", "会计", "统计", "数据", "风控", "市场"],
@@ -45,14 +48,6 @@ function calendarDate(date: string, time: string, end = false) {
 function displaySyncTime(value: string) {
   if (!value) return "等待首次同步";
   return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
-}
-
-function jobMatch(job: ScuJob, profile: Profile) {
-  const profileTerms = `${profile.major} ${profile.skills}`.toLowerCase().split(/[\s,，、/]+/).filter((term) => term.length > 1);
-  const jobText = `${job.title} ${job.major} ${job.requirements} ${job.responsibilities} ${job.industry}`.toLowerCase();
-  const hits = profileTerms.filter((term) => jobText.includes(term));
-  const degreeHit = !profile.degree || job.education === "不限" || job.education.includes(profile.degree.replace("在读", ""));
-  return Math.min(96, 56 + (degreeHit ? 16 : 0) + Math.min(24, hits.length * 8));
 }
 
 function recommendEvent(event: CampusEvent, profile: Profile): RecommendedEvent {
@@ -95,6 +90,8 @@ export default function Home() {
   const [jobFeed, setJobFeed] = useState<ScuJobFeed | null>(null);
   const [jobQuery, setJobQuery] = useState("");
   const [jobNature, setJobNature] = useState("全部岗位");
+  const [jobSort, setJobSort] = useState<JobSort>("latest");
+  const [selectedJob, setSelectedJob] = useState<ScoredJob | null>(null);
 
   useEffect(() => { localStorage.setItem("jobrec-campus-saved", JSON.stringify(saved)); }, [saved]);
   useEffect(() => { localStorage.setItem("jobrec-campus-prep", JSON.stringify(prep)); }, [prep]);
@@ -129,7 +126,12 @@ export default function Home() {
     const keyword = `${job.title}${job.company}${job.major}${job.location}${job.industry}`.toLowerCase();
     return (!jobQuery || keyword.includes(jobQuery.toLowerCase()))
       && (jobNature === "全部岗位" || job.nature.includes(jobNature));
-  }).slice(0, 12), [jobFeed, jobNature, jobQuery]);
+  }).map((job) => ({ ...job, decision: scoreJob(job, profile) })).sort((a, b) => {
+    if (jobSort === "match") return b.decision.match - a.decision.match;
+    if (jobSort === "success") return b.decision.success - a.decision.success;
+    if (jobSort === "composite") return b.decision.composite - a.decision.composite;
+    return b.publishedAt.localeCompare(a.publishedAt);
+  }).slice(0, 12), [jobFeed, jobNature, jobQuery, jobSort, profile]);
 
   function toggleSave(id: string) {
     const exists = saved.includes(id);
@@ -139,7 +141,7 @@ export default function Home() {
   function togglePrep(item: string) { setPrep(prep.includes(item) ? prep.filter((value) => value !== item) : [...prep, item]); }
   function openProfile() { setDraftProfile(profile); setShowUserMenu(false); setShowProfileModal(true); }
   function saveProfile() {
-    const normalized = { ...draftProfile, name: draftProfile.name.trim() || "君宝", major: draftProfile.major.trim(), skills: draftProfile.skills.trim() };
+    const normalized = { ...draftProfile, name: draftProfile.name.trim() || "君宝", major: draftProfile.major.trim(), skills: draftProfile.skills.trim(), targetLocations: (draftProfile.targetLocations || "").trim() };
     setProfile(normalized); setLoggedIn(true); setShowProfileModal(false);
     localStorage.setItem("jobrec-campus-profile", JSON.stringify(normalized)); localStorage.setItem("jobrec-campus-login", "true");
     setToast("求职档案已保存，推荐已更新");
@@ -187,10 +189,12 @@ export default function Home() {
       </section> : <section className="profile-callout"><div><span>◎</span><p><b>让合适的宣讲会主动找到你</b><small>登录并填写学历、专业、技能和意向企业类型，系统会优先呈现相关活动。</small></p></div><button onClick={openProfile}>建立求职档案 →</button></section>}
 
       <section className="jobs-section" id="jobs">
-        <div className="jobs-heading"><div><span className="eyebrow">SCU LIVE JOB FEED</span><h2>川大最新岗位</h2><p>系统每 6 小时同步一次就业指导中心官网公开岗位，结果以官方原文为准。</p></div><div className="sync-badge"><i className={jobFeed ? "online" : ""} /><span>{jobFeed ? `已同步 ${jobFeed.count} 条` : "正在读取"}<small>{jobFeed ? displaySyncTime(jobFeed.updatedAt) : "等待数据"}</small></span></div></div>
+        <div className="jobs-heading"><div><span className="eyebrow">SCU DECISION ENGINE</span><h2>岗位决策台</h2><p>从“适不适合、机会多大、是否值得优先投”三个维度帮你做选择。</p></div><div className="sync-badge"><i className={jobFeed ? "online" : ""} /><span>{jobFeed ? `已同步 ${jobFeed.count} 条` : "正在读取"}<small>{jobFeed ? displaySyncTime(jobFeed.updatedAt) : "等待数据"}</small></span></div></div>
         <div className="jobs-toolbar"><label><span>⌕</span><input value={jobQuery} onChange={(event) => setJobQuery(event.target.value)} placeholder="搜索岗位、企业、专业或地点" /></label><select value={jobNature} onChange={(event) => setJobNature(event.target.value)}><option>全部岗位</option><option>全职</option><option>实习</option></select><a href={jobFeed?.sourceUrl || "https://jy.scu.edu.cn/index/index/employjob.html"} target="_blank" rel="noreferrer">川大岗位原始列表 ↗</a></div>
-        <div className="jobs-grid">{filteredJobs.map((job) => <article key={job.id}><div className="job-top"><span>{job.nature}</span><b>{loggedIn ? `${jobMatch(job, profile)}% 匹配` : job.publishedAt || "最新发布"}</b></div><h3>{job.title}</h3><p>{job.company}</p><dl><div><dt>地点</dt><dd>{job.location}</dd></div><div><dt>学历</dt><dd>{job.education}</dd></div><div><dt>薪资</dt><dd>{job.salary}</dd></div><div><dt>截止</dt><dd>{job.deadline || "以官网为准"}</dd></div></dl><div className="job-tags"><span>{job.jobType}</span><span>{job.industry}</span></div><a href={job.sourceUrl} target="_blank" rel="noreferrer">查看川大官方原文 <span>→</span></a></article>)}{!filteredJobs.length && <div className="jobs-empty"><b>{jobFeed ? "没有匹配岗位" : "正在获取川大最新岗位"}</b><p>{jobFeed ? "试试更换关键词或岗位类型。" : "首次加载可能需要几秒钟。"}</p></div>}</div>
-        <p className="jobs-disclaimer">岗位来自四川大学就业指导中心官网公开页面；同步可能存在延迟，投递要求、截止时间及联系方式请以官方原文为准。</p>
+        <div className="decision-sort" aria-label="岗位排序方式"><span>排序策略</span>{([ ["latest", "最新发布"], ["match", "匹配度"], ["success", "成功率"], ["composite", "综合分"] ] as [JobSort, string][]).map(([value, label]) => <button key={value} className={jobSort === value ? "active" : ""} onClick={() => setJobSort(value)}>{label}</button>)}</div>
+        {!loggedIn && jobSort !== "latest" && <div className="decision-hint"><b>当前使用示例档案计算</b><span>建立个人档案后，分数会依据你的学历、专业、技能和意向工作地实时更新。</span><button onClick={openProfile}>建立档案</button></div>}
+        <div className="jobs-grid">{filteredJobs.map((job) => <article key={job.id}><div className="job-top"><span>{job.nature}</span><b>{job.publishedAt || "最新发布"}</b></div><h3>{job.title}</h3><p>{job.company}</p><div className="job-metrics"><div><b>{job.decision.match}</b><span>匹配度</span></div><div><b>{job.decision.success}</b><span>成功率</span></div><div className="primary-metric"><b>{job.decision.composite}</b><span>综合分</span></div></div><dl><div><dt>地点</dt><dd>{job.location}</dd></div><div><dt>学历</dt><dd>{job.education}</dd></div><div><dt>薪资</dt><dd>{job.salary}</dd></div><div><dt>截止</dt><dd>{job.deadline || "以官网为准"}</dd></div></dl><div className="job-tags"><span>{job.jobType}</span><span>{job.industry}</span></div><div className="job-links"><button onClick={() => setSelectedJob(job)}>查看推荐依据</button><a href={job.sourceUrl} target="_blank" rel="noreferrer">官方原文 ↗</a></div></article>)}{!filteredJobs.length && <div className="jobs-empty"><b>{jobFeed ? "没有匹配岗位" : "正在获取川大最新岗位"}</b><p>{jobFeed ? "试试更换关键词或岗位类型。" : "首次加载可能需要几秒钟。"}</p></div>}</div>
+        <p className="jobs-disclaimer">“成功率”为基于学历门槛、招聘人数、专业限制和截止时间计算的机会指数，不是企业录用概率；投递要求请以官方原文为准。</p>
       </section>
 
       <section className="workspace" id="events">
@@ -212,11 +216,46 @@ export default function Home() {
 
     <footer><div className="brand"><span className="brand-mark">ssp</span><span><b>智聘方舟</b><small>校园求职资源导航</small></span></div><p>作品集交互原型 · 数据来自四川大学就业指导中心官网</p><a href={officialSources.home} target="_blank" rel="noreferrer">官方数据源 ↗</a></footer>
 
-    {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions */}
-    {showProfileModal && <div className="modal-layer" onMouseDown={() => setShowProfileModal(false)}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowProfileModal(false)}>×</button><span className="profile-kicker">本机体验登录</span><h2 id="profile-title">建立求职档案</h2><p className="profile-intro">信息仅保存在当前浏览器，用于计算活动推荐，不会上传至服务器。</p><form onSubmit={(event) => { event.preventDefault(); saveProfile(); }}><div className="profile-form-grid"><label><span>昵称</span><input value={draftProfile.name} onChange={(event) => setDraftProfile({ ...draftProfile, name: event.target.value })} placeholder="例如：君宝" /></label><label><span>最高学历</span><select value={draftProfile.degree} onChange={(event) => setDraftProfile({ ...draftProfile, degree: event.target.value })}><option>本科</option><option>硕士</option><option>博士</option></select></label><label className="wide"><span>专业</span><input value={draftProfile.major} onChange={(event) => setDraftProfile({ ...draftProfile, major: event.target.value })} placeholder="例如：应用统计、计算机科学、临床医学" /></label><label className="wide"><span>技能关键词</span><textarea value={draftProfile.skills} onChange={(event) => setDraftProfile({ ...draftProfile, skills: event.target.value })} rows={3} placeholder="例如：Python、数据分析、英语、项目管理" /></label><label><span>偏好校区</span><select value={draftProfile.campus} onChange={(event) => setDraftProfile({ ...draftProfile, campus: event.target.value as Profile["campus"] })}><option>不限</option><option>望江校区</option><option>江安校区</option><option>华西校区</option><option>线上</option></select></label><label className="resume-upload"><span>附加简历（可选）</span><input type="file" accept=".pdf,.doc,.docx" onChange={(event) => setResumeFileName(event.target.files?.[0]?.name || "")} /><i>{resumeFileName || "选择 PDF / Word"}</i></label></div><fieldset><legend>意向企业类型（可多选）</legend><div className="target-types">{companyTypes.map((item) => <label key={item}><input type="checkbox" checked={draftProfile.targetTypes.includes(item)} onChange={() => toggleTargetType(item)} /><span>{item}</span></label>)}</div></fieldset><div className="privacy-note">🔒 简历文件只读取文件名，不上传、不解析；推荐依据由你填写的专业与技能生成。</div><button className="profile-save" type="submit">保存档案并查看推荐</button></form></section></div>}
+    {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+    {showProfileModal && <div className="modal-layer" onMouseDown={() => setShowProfileModal(false)}>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
+      <section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title" onMouseDown={(event) => event.stopPropagation()}>
+        <button className="modal-close" onClick={() => setShowProfileModal(false)}>×</button>
+        <span className="profile-kicker">本机体验登录</span><h2 id="profile-title">建立求职档案</h2>
+        <p className="profile-intro">信息仅保存在当前浏览器，用于计算活动推荐，不会上传至服务器。</p>
+        <form onSubmit={(event) => { event.preventDefault(); saveProfile(); }}>
+          <div className="profile-form-grid">
+            <label><span>昵称</span><input value={draftProfile.name} onChange={(event) => setDraftProfile({ ...draftProfile, name: event.target.value })} placeholder="例如：君宝" /></label>
+            <label><span>最高学历</span><select value={draftProfile.degree} onChange={(event) => setDraftProfile({ ...draftProfile, degree: event.target.value })}><option>本科</option><option>硕士</option><option>博士</option></select></label>
+            <label className="wide"><span>专业</span><input value={draftProfile.major} onChange={(event) => setDraftProfile({ ...draftProfile, major: event.target.value })} placeholder="例如：应用统计、计算机科学、临床医学" /></label>
+            <label className="wide"><span>技能关键词</span><textarea value={draftProfile.skills} onChange={(event) => setDraftProfile({ ...draftProfile, skills: event.target.value })} rows={3} placeholder="例如：Python、数据分析、英语、项目管理" /></label>
+            <label><span>意向工作地</span><input value={draftProfile.targetLocations || ""} onChange={(event) => setDraftProfile({ ...draftProfile, targetLocations: event.target.value })} placeholder="例如：成都、重庆、上海" /></label>
+            <label><span>偏好校区</span><select value={draftProfile.campus} onChange={(event) => setDraftProfile({ ...draftProfile, campus: event.target.value as Profile["campus"] })}><option>不限</option><option>望江校区</option><option>江安校区</option><option>华西校区</option><option>线上</option></select></label>
+            <label className="resume-upload wide"><span>附加简历（可选）</span><input type="file" accept=".pdf,.doc,.docx" onChange={(event) => setResumeFileName(event.target.files?.[0]?.name || "")} /><i>{resumeFileName || "选择 PDF / Word"}</i></label>
+          </div>
+          <fieldset><legend>意向企业类型（可多选）</legend><div className="target-types">{companyTypes.map((item) => <label key={item}><input type="checkbox" checked={draftProfile.targetTypes.includes(item)} onChange={() => toggleTargetType(item)} /><span>{item}</span></label>)}</div></fieldset>
+          <div className="privacy-note">🔒 简历文件只读取文件名，不上传、不解析；推荐依据由你填写的学历、专业、技能与工作地偏好生成。</div>
+          <button className="profile-save" type="submit">保存档案并查看推荐</button>
+        </form>
+      </section>
+    </div>}
 
     {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions */}
     {selected && <div className="modal-layer" onMouseDown={() => setSelected(null)}><section className="event-modal" role="dialog" aria-modal="true" aria-labelledby="event-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setSelected(null)}>×</button><div className="event-type-row"><span className={`tag ${selected.type === "双选会" ? "blue" : ""}`}>{selected.type}</span><span className="tag">{selected.campus}</span><span className={`tag ${selected.status === "past" ? "muted" : "green"}`}>{selected.status === "past" ? "往期记录" : "即将开始"}</span></div><h2 id="event-title">{selected.title}</h2><p className="modal-summary">{selected.summary}</p><dl className="event-details"><div><dt>日期</dt><dd>{displayDate(selected.date)}</dd></div><div><dt>时间</dt><dd>{selected.time}</dd></div><div><dt>地点</dt><dd>{selected.campus} · {selected.address}</dd></div><div><dt>适合人群</dt><dd>{selected.audience}</dd></div><div><dt>发布方</dt><dd>{selected.organizer}</dd></div></dl><div className="modal-note">信息核验于 {officialSources.updatedAt}。活动安排可能变化，请以官方页面最新通知为准。</div><div className="modal-actions"><button onClick={() => copyAddress(selected)}>复制地点</button><button onClick={() => addCalendar(selected)}>下载日历</button><button className="primary" onClick={() => toggleSave(selected.id)}>{saved.includes(selected.id) ? "✓ 已加入日程" : "+ 加入我的日程"}</button></div><a className="modal-official" href={selected.officialUrl} target="_blank" rel="noreferrer">前往四川大学就业指导中心官网核验详情 ↗</a></section></div>}
+    {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+    {selectedJob && <div className="modal-layer" onMouseDown={() => setSelectedJob(null)}>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
+      <section className="event-modal job-decision-modal" role="dialog" aria-modal="true" aria-labelledby="job-title" onMouseDown={(event) => event.stopPropagation()}>
+        <button className="modal-close" onClick={() => setSelectedJob(null)}>×</button>
+        <span className="profile-kicker">DECISION EXPLANATION</span>
+        <h2 id="job-title">{selectedJob.title}</h2>
+        <p className="modal-summary">{selectedJob.company} · {selectedJob.location}</p>
+        <div className="decision-summary"><div><b>{selectedJob.decision.match}</b><span>匹配度</span></div><div><b>{selectedJob.decision.success}</b><span>成功率</span></div><div><b>{selectedJob.decision.composite}</b><span>综合分</span></div></div>
+        <div className="reason-columns"><section><h3>为什么适合你</h3><ul>{selectedJob.decision.matchReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></section><section><h3>机会指数依据</h3><ul>{selectedJob.decision.successReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></section></div>
+        <div className="modal-note">综合分 = 匹配度 × 60% + 成功率 × 40%。成功率是规则估计的机会指数，不代表企业录用承诺。</div>
+        <a className="modal-official" href={selectedJob.sourceUrl} target="_blank" rel="noreferrer">查看四川大学就业指导中心官网原文 ↗</a>
+      </section>
+    </div>}
     {toast && <div className="toast">✓ {toast}</div>}
   </div>;
 }

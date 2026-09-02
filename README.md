@@ -1,100 +1,60 @@
-# vinext-starter
+# 智聘方舟 JobRec
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+面向高校毕业生的校园求职决策原型。项目聚合四川大学就业指导中心官网公开的岗位、宣讲会与双选会信息，帮助学生完成“发现机会—比较岗位—加入日程—准备参会”的求职闭环。
 
-## Prerequisites
+在线体验：[GitHub Pages](https://jingxinyue6-sys.github.io/jobrec-ark-portfolio/)
 
-- Node.js `>=22.13.0`
+## 核心能力
 
-## Quick Start
+- 校招信息聚合：统一呈现最新岗位、校园宣讲与双选会信息，并保留官方原文入口。
+- 三指标决策：支持按匹配度、成功率（机会指数）和综合分查看岗位。
+- 可解释推荐：展示学历、专业技能、工作地、招聘人数和截止时间等评分依据。
+- 个性化档案：学历、专业、技能、意向工作地和企业类型偏好仅保存在当前浏览器。
+- 行动管理：支持活动收藏、参会准备清单和 `.ics` 日历导出。
+- 数据安全：公开岗位同步时对电话、邮箱和社交账号等联系方式进行脱敏与阻断校验。
+
+## 决策模型
+
+当前版本采用透明、可测试的规则模型：
+
+- **匹配度**：综合学历门槛、专业/技能关键词和意向工作地。
+- **成功率**：根据学历门槛、招聘人数、专业限制和投递截止时间估算机会指数。
+- **综合分**：`匹配度 × 60% + 成功率 × 40%`。
+
+“成功率”用于岗位比较，不是经过企业录用数据校准的真实概率，也不构成录用承诺。双塔模型与多任务预测属于后续规划，待获得合规的用户—岗位交互及录用标签后再训练验证。
+
+## 数据流程
+
+`scripts/sync-scu-jobs.mjs` 从学校公开岗位列表获取全职与实习信息，完成详情解析、稳定 ID、去重、失败重试、历史缓存回退、隐私脱敏和结果校验。GitHub Actions 每 6 小时执行一次同步，并构建发布静态站点。
+
+历史统计数据来自项目提供的 `data_10.13.xlsx`，共 9,878 条校招岗位记录；线上岗位流保留最近 48 条公开岗位。
+
+## 技术栈
+
+- React 19、TypeScript、Vinext、Vite
+- GitHub Actions、GitHub Pages
+- Cloudflare Workers / OpenAI Sites 构建兼容
+- Node.js 原生测试、ESLint
+
+## 本地运行
 
 ```bash
 npm install
 npm run dev
-npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+## 验证
 
-## Included Shape
-
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
-
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+npm test
+npm run lint
+npm run build:pages
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+## 数据同步
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+```bash
+npm run sync:scu
+```
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+所有岗位和活动安排均可能发生变化，请在投递或参会前前往四川大学就业指导中心官网核验。
