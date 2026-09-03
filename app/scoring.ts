@@ -3,6 +3,7 @@ export type ScoringProfile = {
   major: string;
   skills: string;
   targetLocations?: string;
+  resumeKeywords?: string;
 };
 
 export type ScoringJob = {
@@ -50,7 +51,7 @@ function deadlineDays(value: string, now: Date) {
 }
 
 export function scoreJob(job: ScoringJob, profile: ScoringProfile, now = new Date()): JobDecisionScore {
-  const profileTerms = [...new Set(terms(`${profile.major} ${profile.skills}`))];
+  const profileTerms = [...new Set(terms(`${profile.major} ${profile.skills} ${profile.resumeKeywords ?? ""}`))];
   const jobText = `${job.title} ${job.major} ${job.requirements} ${job.responsibilities} ${job.industry}`.toLowerCase();
   const matchedTerms = profileTerms.filter((term) => jobText.includes(term));
   const fitsDegree = degreeFits(job.education, profile.degree);
@@ -65,6 +66,7 @@ export function scoreJob(job: ScoringJob, profile: ScoringProfile, now = new Dat
     fitsDegree ? `学历要求与${profile.degree}背景相符` : `需再次确认${job.education}学历要求`,
     matchedTerms.length ? `命中${matchedTerms.slice(0, 3).join("、")}等关键词` : "暂未命中专业或技能关键词",
   ];
+  if (profile.resumeKeywords?.trim()) matchReasons.unshift("已使用上传简历识别出的岗位关键词");
   if (locationTerms.length) matchReasons.push(matchedLocations.length ? `工作地符合${matchedLocations.slice(0, 2).join("、")}偏好` : "工作地未命中已填写偏好");
 
   const headcount = headcountValue(job.headcount);

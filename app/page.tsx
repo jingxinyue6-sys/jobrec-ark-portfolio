@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { campusEvents, officialSources, type CampusEvent } from "./events";
+import { parseResumeFile, type ParsedResumeProfile } from "./resume-parser";
 import { scoreJob, type JobDecisionScore } from "./scoring";
 
 type Scope = "all" | "upcoming" | "saved";
 type EventType = "全部类型" | CampusEvent["type"];
 type Campus = "全部校区" | CampusEvent["campus"];
 type CompanyType = "全部企业" | CampusEvent["companyType"];
-type Profile = { name: string; degree: string; major: string; skills: string; targetLocations: string; campus: CampusEvent["campus"] | "不限"; targetTypes: CampusEvent["companyType"][] };
+type Profile = { name: string; degree: string; major: string; skills: string; resumeKeywords?: string; targetLocations: string; campus: CampusEvent["campus"] | "不限"; targetTypes: CampusEvent["companyType"][] };
 type RecommendedEvent = CampusEvent & { match: number; reason: string };
 type ScuJob = {
   id: string; title: string; company: string; jobType: string; nature: string; education: string;
@@ -17,10 +18,10 @@ type ScuJob = {
 };
 type ScuJobFeed = { source: string; sourceUrl: string; updatedAt: string; count: number; jobs: ScuJob[] };
 type ScoredJob = ScuJob & { decision: JobDecisionScore };
-type JobSort = "latest" | "match" | "success" | "composite";
+type JobSort = "latest" | "match" | "opportunity" | "composite";
 const prepItems = ["更新一页简历", "准备60秒自我介绍", "整理3个想问企业的问题"];
 const companyTypes: CampusEvent["companyType"][] = ["国企央企", "金融", "教育", "医药卫生", "地方引才", "综合招聘"];
-const defaultProfile: Profile = { name: "君宝", degree: "硕士", major: "", skills: "", targetLocations: "", campus: "不限", targetTypes: ["国企央企"] };
+const defaultProfile: Profile = { name: "君宝", degree: "硕士", major: "", skills: "", resumeKeywords: "", targetLocations: "", campus: "不限", targetTypes: ["国企央企"] };
 const categoryKeywords: Record<CampusEvent["companyType"], string[]> = {
   国企央企: ["工程", "计算机", "数据", "统计", "管理", "能源", "材料", "机械", "电气"],
   金融: ["金融", "经济", "会计", "统计", "数据", "风控", "市场"],
@@ -51,7 +52,7 @@ function displaySyncTime(value: string) {
 }
 
 function recommendEvent(event: CampusEvent, profile: Profile): RecommendedEvent {
-  const profileText = `${profile.major} ${profile.skills}`.toLowerCase();
+  const profileText = `${profile.major} ${profile.skills} ${profile.resumeKeywords ?? ""}`.toLowerCase();
   const hits = categoryKeywords[event.companyType].filter((keyword) => profileText.includes(keyword.toLowerCase()));
   const typeHit = (profile.targetTypes || []).includes(event.companyType);
   const campusHit = !profile.campus || profile.campus === "不限" || profile.campus === event.campus;
@@ -77,6 +78,9 @@ export default function Home() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [resumeFileName, setResumeFileName] = useState("");
+  const [resumeStatus, setResumeStatus] = useState<"idle" | "parsing" | "success" | "error">("idle");
+  const [resumeMessage, setResumeMessage] = useState("");
+  const [parsedResume, setParsedResume] = useState<ParsedResumeProfile | null>(null);
   const [saved, setSaved] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try { return JSON.parse(localStorage.getItem("jobrec-campus-saved") || "[]"); } catch { return []; }
@@ -128,7 +132,7 @@ export default function Home() {
       && (jobNature === "全部岗位" || job.nature.includes(jobNature));
   }).map((job) => ({ ...job, decision: scoreJob(job, profile) })).sort((a, b) => {
     if (jobSort === "match") return b.decision.match - a.decision.match;
-    if (jobSort === "success") return b.decision.success - a.decision.success;
+    if (jobSort === "opportunity") return b.decision.success - a.decision.success;
     if (jobSort === "composite") return b.decision.composite - a.decision.composite;
     return b.publishedAt.localeCompare(a.publishedAt);
   }).slice(0, 12), [jobFeed, jobNature, jobQuery, jobSort, profile]);
@@ -141,14 +145,42 @@ export default function Home() {
   function togglePrep(item: string) { setPrep(prep.includes(item) ? prep.filter((value) => value !== item) : [...prep, item]); }
   function openProfile() { setDraftProfile(profile); setShowUserMenu(false); setShowProfileModal(true); }
   function saveProfile() {
-    const normalized = { ...draftProfile, name: draftProfile.name.trim() || "君宝", major: draftProfile.major.trim(), skills: draftProfile.skills.trim(), targetLocations: (draftProfile.targetLocations || "").trim() };
+    const normalized = { ...draftProfile, name: draftProfile.name.trim() || "君宝", major: draftProfile.major.trim(), skills: draftProfile.skills.trim(), resumeKeywords: (draftProfile.resumeKeywords || "").trim(), targetLocations: (draftProfile.targetLocations || "").trim() };
     setProfile(normalized); setLoggedIn(true); setShowProfileModal(false);
     localStorage.setItem("jobrec-campus-profile", JSON.stringify(normalized)); localStorage.setItem("jobrec-campus-login", "true");
     setToast("求职档案已保存，推荐已更新");
   }
-  function logout() { setLoggedIn(false); setShowUserMenu(false); localStorage.removeItem("jobrec-campus-login"); setToast("已退出本机体验账号"); }
+  function logout() { setLoggedIn(false); setJobSort("latest"); setShowUserMenu(false); localStorage.removeItem("jobrec-campus-login"); setToast("已退出本机体验账号"); }
+  function chooseJobSort(value: JobSort) {
+    if (value !== "latest" && !loggedIn) { openProfile(); setToast("请先上传简历或完善求职画像"); return; }
+    setJobSort(value);
+  }
   function toggleTargetType(value: CampusEvent["companyType"]) {
     setDraftProfile((current) => ({ ...current, targetTypes: current.targetTypes.includes(value) ? current.targetTypes.filter((item) => item !== value) : [...current.targetTypes, value] }));
+  }
+  async function handleResume(file?: File) {
+    if (!file) return;
+    setResumeFileName(file.name); setResumeStatus("parsing"); setResumeMessage("正在本地读取简历内容…"); setParsedResume(null);
+    try {
+      if (file.size > 10 * 1024 * 1024) throw new Error("简历文件请控制在 10MB 以内");
+      const parsed = await parseResumeFile(file);
+      if (parsed.textLength < 40) throw new Error("没有读取到足够文字；扫描版 PDF 请先进行 OCR");
+      const extractedTerms = [...new Set([...parsed.skills, ...parsed.keywords])];
+      setParsedResume(parsed);
+      setDraftProfile((current) => {
+        const existingSkills = current.skills.split(/[，,、\s]+/).filter(Boolean);
+        return {
+          ...current,
+          degree: parsed.degree || current.degree,
+          major: parsed.major || current.major,
+          skills: [...new Set([...existingSkills, ...parsed.skills])].join("、"),
+          resumeKeywords: extractedTerms.join(" "),
+        };
+      });
+      setResumeStatus("success"); setResumeMessage(`已读取 ${parsed.textLength.toLocaleString("zh-CN")} 个字符，识别出 ${extractedTerms.length} 个岗位相关关键词`);
+    } catch (error) {
+      setResumeStatus("error"); setResumeMessage(error instanceof Error ? error.message : "简历解析失败，请换一个文件重试");
+    }
   }
   function addCalendar(event: CampusEvent) {
     const body = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//JobRec//Campus Events//CN", "BEGIN:VEVENT", `UID:${event.id}@jobrec`, `DTSTART;TZID=Asia/Shanghai:${calendarDate(event.date, event.time)}`, `DTEND;TZID=Asia/Shanghai:${calendarDate(event.date, event.time, true)}`, `SUMMARY:${event.title}`, `LOCATION:${event.campus} ${event.address}`, `DESCRIPTION:信息来源：四川大学就业指导中心官网 ${event.officialUrl}`, "END:VEVENT", "END:VCALENDAR"].join("\r\n");
@@ -183,18 +215,18 @@ export default function Home() {
       <section className="quick-stats" aria-label="数据概览"><div><span>下一场活动</span><b>09.04</b><small>国企央企专场</small></div><div><span>同步岗位</span><b>{jobFeed?.count || "—"}</b><small>全职 · 实习 · 综合</small></div><div><span>覆盖校区</span><b>3</b><small>望江 · 江安 · 华西</small></div><div><span>最近同步</span><b>{jobFeed ? displaySyncTime(jobFeed.updatedAt).slice(0, 5) : "—"}</b><small>{jobFeed ? displaySyncTime(jobFeed.updatedAt) : "正在读取官方数据"}</small></div></section>
 
       {loggedIn ? <section className="recommend-section">
-        <div className="recommend-head"><div><span className="eyebrow">FOR YOU</span><h2>为{profile.name}推荐</h2><p>根据你的{profile.degree}学历、{profile.major || "专业"}背景、技能与求职偏好计算。</p></div><button onClick={openProfile}>调整求职档案</button></div>
+        <div className="recommend-head"><div><span className="eyebrow">FOR YOU</span><h2>为{profile.name}推荐</h2><p>根据你填写或从简历识别出的学历、专业、技能与求职偏好计算。</p></div><button onClick={openProfile}>调整求职档案</button></div>
         <div className="recommend-grid">{recommendations.map((event) => <article key={event.id}><div className="match-score"><b>{event.match}%</b><span>匹配度</span></div><div className="recommend-content"><div><span className="tag blue">{event.companyType}</span><span className="tag">{event.campus}</span></div><h3>{event.title}</h3><p>{event.reason}</p><small>{displayDate(event.date)} · {event.time}</small></div><div className="recommend-actions"><button onClick={() => setSelected(event)}>查看详情</button><button className={saved.includes(event.id) ? "saved" : ""} onClick={() => toggleSave(event.id)}>{saved.includes(event.id) ? "✓ 已加入日程" : "+ 加入日程"}</button></div></article>)}</div>
-        <p className="recommend-note">推荐基于活动主题与个人填写信息的规则匹配，不代表企业资格审核或录用承诺。</p>
-      </section> : <section className="profile-callout"><div><span>◎</span><p><b>让合适的宣讲会主动找到你</b><small>登录并填写学历、专业、技能和意向企业类型，系统会优先呈现相关活动。</small></p></div><button onClick={openProfile}>建立求职档案 →</button></section>}
+        <p className="recommend-note">推荐基于活动主题与个人画像的可解释规则匹配，不代表企业资格审核或录用承诺。</p>
+      </section> : <section className="profile-callout"><div><span>◎</span><p><b>让合适的岗位主动找到你</b><small>上传简历或填写学历、专业与技能，系统会基于真实画像重新排序。</small></p></div><button onClick={openProfile}>上传简历 / 建立档案 →</button></section>}
 
       <section className="jobs-section" id="jobs">
         <div className="jobs-heading"><div><span className="eyebrow">SCU DECISION ENGINE</span><h2>岗位决策台</h2><p>从“适不适合、机会多大、是否值得优先投”三个维度帮你做选择。</p></div><div className="sync-badge"><i className={jobFeed ? "online" : ""} /><span>{jobFeed ? `已同步 ${jobFeed.count} 条` : "正在读取"}<small>{jobFeed ? displaySyncTime(jobFeed.updatedAt) : "等待数据"}</small></span></div></div>
         <div className="jobs-toolbar"><label><span>⌕</span><input value={jobQuery} onChange={(event) => setJobQuery(event.target.value)} placeholder="搜索岗位、企业、专业或地点" /></label><select value={jobNature} onChange={(event) => setJobNature(event.target.value)}><option>全部岗位</option><option>全职</option><option>实习</option></select><a href={jobFeed?.sourceUrl || "https://jy.scu.edu.cn/index/index/employjob.html"} target="_blank" rel="noreferrer">川大岗位原始列表 ↗</a></div>
-        <div className="decision-sort" aria-label="岗位排序方式"><span>排序策略</span>{([ ["latest", "最新发布"], ["match", "匹配度"], ["success", "成功率"], ["composite", "综合分"] ] as [JobSort, string][]).map(([value, label]) => <button key={value} className={jobSort === value ? "active" : ""} onClick={() => setJobSort(value)}>{label}</button>)}</div>
-        {!loggedIn && jobSort !== "latest" && <div className="decision-hint"><b>当前使用示例档案计算</b><span>建立个人档案后，分数会依据你的学历、专业、技能和意向工作地实时更新。</span><button onClick={openProfile}>建立档案</button></div>}
-        <div className="jobs-grid">{filteredJobs.map((job) => <article key={job.id}><div className="job-top"><span>{job.nature}</span><b>{job.publishedAt || "最新发布"}</b></div><h3>{job.title}</h3><p>{job.company}</p><div className="job-metrics"><div><b>{job.decision.match}</b><span>匹配度</span></div><div><b>{job.decision.success}</b><span>成功率</span></div><div className="primary-metric"><b>{job.decision.composite}</b><span>综合分</span></div></div><dl><div><dt>地点</dt><dd>{job.location}</dd></div><div><dt>学历</dt><dd>{job.education}</dd></div><div><dt>薪资</dt><dd>{job.salary}</dd></div><div><dt>截止</dt><dd>{job.deadline || "以官网为准"}</dd></div></dl><div className="job-tags"><span>{job.jobType}</span><span>{job.industry}</span></div><div className="job-links"><button onClick={() => setSelectedJob(job)}>查看推荐依据</button><a href={job.sourceUrl} target="_blank" rel="noreferrer">官方原文 ↗</a></div></article>)}{!filteredJobs.length && <div className="jobs-empty"><b>{jobFeed ? "没有匹配岗位" : "正在获取川大最新岗位"}</b><p>{jobFeed ? "试试更换关键词或岗位类型。" : "首次加载可能需要几秒钟。"}</p></div>}</div>
-        <p className="jobs-disclaimer">“成功率”为基于学历门槛、招聘人数、专业限制和截止时间计算的机会指数，不是企业录用概率；投递要求请以官方原文为准。</p>
+        <div className="decision-sort" aria-label="岗位排序方式"><span>排序策略</span>{([ ["latest", "最新发布"], ["match", "匹配度"], ["opportunity", "机会指数"], ["composite", "综合分"] ] as [JobSort, string][]).map(([value, label]) => <button key={value} className={jobSort === value ? "active" : ""} onClick={() => chooseJobSort(value)}>{label}</button>)}</div>
+        {!loggedIn && <div className="decision-hint"><b>尚未计算个性化分数</b><span>上传简历或建立求职画像后，系统才会显示匹配度和综合分。</span><button onClick={openProfile}>上传简历</button></div>}
+        <div className="jobs-grid">{filteredJobs.map((job) => <article key={job.id}><div className="job-top"><span>{job.nature}</span><b>{job.publishedAt || "最新发布"}</b></div><h3>{job.title}</h3><p>{job.company}</p>{loggedIn ? <div className="job-metrics"><div><b>{job.decision.match}</b><span>匹配度</span></div><div><b>{job.decision.success}</b><span>机会指数</span></div><div className="primary-metric"><b>{job.decision.composite}</b><span>综合分</span></div></div> : <button className="job-profile-cta" onClick={openProfile}>上传简历后查看个性化评分 →</button>}<dl><div><dt>地点</dt><dd>{job.location}</dd></div><div><dt>学历</dt><dd>{job.education}</dd></div><div><dt>薪资</dt><dd>{job.salary}</dd></div><div><dt>截止</dt><dd>{job.deadline || "以官网为准"}</dd></div></dl><div className="job-tags"><span>{job.jobType}</span><span>{job.industry}</span></div><div className="job-links"><button onClick={() => loggedIn ? setSelectedJob(job) : openProfile()}>{loggedIn ? "查看推荐依据" : "建立求职画像"}</button><a href={job.sourceUrl} target="_blank" rel="noreferrer">官方原文 ↗</a></div></article>)}{!filteredJobs.length && <div className="jobs-empty"><b>{jobFeed ? "没有匹配岗位" : "正在获取川大最新岗位"}</b><p>{jobFeed ? "试试更换关键词或岗位类型。" : "首次加载可能需要几秒钟。"}</p></div>}</div>
+        <p className="jobs-disclaimer">机会指数基于学历门槛、招聘人数、专业限制和截止时间，用于比较岗位，并非企业录用概率；投递要求请以官方原文为准。</p>
       </section>
 
       <section className="workspace" id="events">
@@ -231,11 +263,12 @@ export default function Home() {
             <label className="wide"><span>技能关键词</span><textarea value={draftProfile.skills} onChange={(event) => setDraftProfile({ ...draftProfile, skills: event.target.value })} rows={3} placeholder="例如：Python、数据分析、英语、项目管理" /></label>
             <label><span>意向工作地</span><input value={draftProfile.targetLocations || ""} onChange={(event) => setDraftProfile({ ...draftProfile, targetLocations: event.target.value })} placeholder="例如：成都、重庆、上海" /></label>
             <label><span>偏好校区</span><select value={draftProfile.campus} onChange={(event) => setDraftProfile({ ...draftProfile, campus: event.target.value as Profile["campus"] })}><option>不限</option><option>望江校区</option><option>江安校区</option><option>华西校区</option><option>线上</option></select></label>
-            <label className="resume-upload wide"><span>附加简历（可选）</span><input type="file" accept=".pdf,.doc,.docx" onChange={(event) => setResumeFileName(event.target.files?.[0]?.name || "")} /><i>{resumeFileName || "选择 PDF / Word"}</i></label>
+            <label className="resume-upload wide"><span>上传简历并自动识别</span><input type="file" accept=".pdf,.docx,.txt" onChange={(event) => void handleResume(event.target.files?.[0])} disabled={resumeStatus === "parsing"} /><i>{resumeStatus === "parsing" ? "正在解析…" : resumeFileName || "选择 PDF / DOCX / TXT"}</i></label>
           </div>
+          {resumeStatus !== "idle" && <div className={`resume-result ${resumeStatus}`} role="status"><b>{resumeStatus === "success" ? "✓ 简历读取成功" : resumeStatus === "error" ? "! 简历读取失败" : "正在解析简历"}</b><p>{resumeMessage}</p>{parsedResume && <div><span>学历：{parsedResume.degree || "未识别"}</span><span>专业：{parsedResume.major || "未识别"}</span><span>技能：{parsedResume.skills.slice(0, 8).join("、") || "未识别"}</span></div>}</div>}
           <fieldset><legend>意向企业类型（可多选）</legend><div className="target-types">{companyTypes.map((item) => <label key={item}><input type="checkbox" checked={draftProfile.targetTypes.includes(item)} onChange={() => toggleTargetType(item)} /><span>{item}</span></label>)}</div></fieldset>
-          <div className="privacy-note">🔒 简历文件只读取文件名，不上传、不解析；推荐依据由你填写的学历、专业、技能与工作地偏好生成。</div>
-          <button className="profile-save" type="submit">保存档案并查看推荐</button>
+          <div className="privacy-note">🔒 简历在当前浏览器本地解析，不会上传到服务器；系统只保存识别出的岗位关键词，你可以在保存前修改。</div>
+          <button className="profile-save" type="submit" disabled={resumeStatus === "parsing"}>保存画像并重新匹配岗位</button>
         </form>
       </section>
     </div>}
@@ -250,9 +283,9 @@ export default function Home() {
         <span className="profile-kicker">DECISION EXPLANATION</span>
         <h2 id="job-title">{selectedJob.title}</h2>
         <p className="modal-summary">{selectedJob.company} · {selectedJob.location}</p>
-        <div className="decision-summary"><div><b>{selectedJob.decision.match}</b><span>匹配度</span></div><div><b>{selectedJob.decision.success}</b><span>成功率</span></div><div><b>{selectedJob.decision.composite}</b><span>综合分</span></div></div>
+        <div className="decision-summary"><div><b>{selectedJob.decision.match}</b><span>匹配度</span></div><div><b>{selectedJob.decision.success}</b><span>机会指数</span></div><div><b>{selectedJob.decision.composite}</b><span>综合分</span></div></div>
         <div className="reason-columns"><section><h3>为什么适合你</h3><ul>{selectedJob.decision.matchReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></section><section><h3>机会指数依据</h3><ul>{selectedJob.decision.successReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></section></div>
-        <div className="modal-note">综合分 = 匹配度 × 60% + 成功率 × 40%。成功率是规则估计的机会指数，不代表企业录用承诺。</div>
+        <div className="modal-note">综合分 = 匹配度 × 60% + 机会指数 × 40%。机会指数用于岗位比较，不代表企业录用承诺。</div>
         <a className="modal-official" href={selectedJob.sourceUrl} target="_blank" rel="noreferrer">查看四川大学就业指导中心官网原文 ↗</a>
       </section>
     </div>}
