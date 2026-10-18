@@ -1,7 +1,7 @@
 {
   "source": "四川大学就业指导中心",
   "sourceUrl": "https://jy.scu.edu.cn/index/index/employjob.html",
-  "updatedAt": "2026-10-18T11:17:04.019Z",
+  "updatedAt": "2026-10-18T15:56:22.596Z",
   "count": 48,
   "jobs": [
     {
@@ -79,6 +79,25 @@
       "industry": "制造业",
       "source": "四川大学就业指导中心",
       "sourceUrl": "https://jy.scu.edu.cn/index/index/employjobdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eZmKzrays4bddricp9CWi5qikaeWacSdqLqGfaK2w4iil5C4zNbGiL-E"
+    },
+    {
+      "id": "scu-a767b03d6bf99e",
+      "title": "研发工程师",
+      "company": "中科泰达新材料科技（苏州）有限公司",
+      "jobType": "生产|制造",
+      "nature": "全职;实习",
+      "education": "硕士",
+      "headcount": "4",
+      "salary": "20000-30000",
+      "publishedAt": "2026-10-17",
+      "deadline": "2027-10-16",
+      "major": "不限",
+      "location": "江苏省苏州市市辖区",
+      "requirements": "学历与专业背景 1.硕士、博士研究生，材料科学与工程、有色金属冶金、金属材料、材料加工工程、粉末冶金等相关专业；应届或已有相关课题经历均可。\n2.博士优先：具备有色金属熔炼、合金凝固、金属提纯、难熔金属加工课题背景；硕士优先：有合金熔炼铸造、金属塑性加工、凝固科学相关毕设经历。\n专业知识与实验能力 1.扎实掌握金属学原理、合金凝固理论、有色金属冶炼、材料加工基础理论；熟悉真空冶金、高温熔炼、铸造成型基本原理。\n2.有真空熔炼、电弧熔炼、电子束熔炼、真空热处理、铸锭制备实操经验优先；了解难熔 / 脆性合金制备难点。\n3.熟悉金相制样、SEMEDS、XRD、力学性能测试等材料表征手段，能够独立完成样品制备、测试与结果解析。\n4.了解金属中杂质控制、元素偏析、铸造裂纹、晶粒调控相关冶金问题；接触过铍、镁、钛、锆等轻金属 / 难熔金属体系者优先。\n5.能独立设计试验方案，根据试验现象调整工艺参数，分析失败原因，迭代优化工艺路线。\n软件与综合素养 1.熟练 Origin 处理实验数据绘图；会使用 ThermoCalc、JMatPro 热力学相图计算软件者优先。\n2.具备中英文文献检索阅读能力，可梳理行业技术现状，提炼创新思路，能够撰写技术报告、论文、专利。\n3.高度重视实验室安全，了解有毒、粉尘、高温真空设备安全操作规范；铍材料存在毒性风险，能够严格遵守安全操作流程。\n4.做事严谨踏实，动手能力强，能够面对反复试验试错；具备团队协作，沟通汇报能力。",
+      "responsibilities": "主要岗位职责 1.负责金属铍、铍合金熔炼工艺开发，开展真空感应熔炼、电弧熔炼、电子束熔炼等工艺试验，完成配料、坩埚选型、熔炼温度时间真空参数调试，控制关键杂质水平。\n2.开展铍及铍合金铸造成型、凝固控制研究，研究铸锭晶粒、气孔、裂纹、偏析等缺陷形成机理，优化浇铸、冷却工艺，提升铸锭冶金质量。\n3.开展铍合金粉末冶金成型工艺研究，包括热等静压、热压、挤压等成型工艺试验，研究加工工艺对微观组织、力学性能的影响规律。\n4.开展铍及铍合金3D打印成型研究，研究晶粒、裂纹、偏析等缺陷形成机理，优化工艺，提升零件质量。\n5.开展材料表征分析：金相显微镜、扫描电镜 SEM、EDS、XRD、硬度、力学性能测试；配合 GDMS、ICP 等手段完成铍及合金中杂质元素分析，建立杂质工艺组织性能关联关系。\n6.整理实验数据，开展机理分析，编写试验记录、技术报告；撰写学术论文、申请发明专利；跟踪国内外铍及铍合金冶炼、提纯、成型领域文献与技术进展。\n7.维护熔炼、热处理、成型相关实验设备，落实高危有毒金属实验安全规范；配合项目任务推进，完成项目阶段性技术目标，参与团队内部技术研讨。",
+      "industry": "科学研究和技术服务业",
+      "source": "四川大学就业指导中心",
+      "sourceUrl": "https://jy.scu.edu.cn/index/index/employjobdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eZmKzrbSsmHddricp9CWi5qikaeWacSdqLqGfaK2w4iil5C4zNbGiL-E"
     },
     {
       "id": "scu-61f64a24ff7c65",
@@ -896,25 +915,6 @@
       "industry": "信息传输、软件和信息技术服务业",
       "source": "四川大学就业指导中心",
       "sourceUrl": "https://jy.scu.edu.cn/index/index/employjobdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh4Y9yKzra6sobddricp9CWi5qikaeWacSdqLqGfaK2w4iil5C4zNbGiL-E"
-    },
-    {
-      "id": "scu-a767b03d6bf99e",
-      "title": "研发工程师",
-      "company": "中科泰达新材料科技（苏州）有限公司",
-      "jobType": "全职+实习",
-      "nature": "全职+实习",
-      "education": "不限",
-      "headcount": "以官网为准",
-      "salary": "面议",
-      "publishedAt": "",
-      "deadline": "",
-      "major": "不限",
-      "location": "以官网为准",
-      "requirements": "请查看川大就业指导中心官网原文",
-      "responsibilities": "请查看川大就业指导中心官网原文",
-      "industry": "未标注",
-      "source": "四川大学就业指导中心",
-      "sourceUrl": "https://jy.scu.edu.cn/index/index/employjobdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eZmKzrbSsmHddricp9CWi5qikaeWacSdqLqGfaK2w4iil5C4zNbGiL-E"
     }
   ]
 }
